@@ -1,5 +1,6 @@
 const express = require("express");
 const { Pool } = require("pg");
+const path = require("path");
 
 const app = express();
 const port = Number(process.env.PORT || 10000);
@@ -21,6 +22,7 @@ const pool = new Pool({
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
 function requireApiKey(req, res, next) {
   if (req.get("X-Api-Key") !== apiKey) {
@@ -144,27 +146,99 @@ app.post(["/api/sync_push", "/api/sync_push.php"], requireApiKey, async (req, re
   }
 });
 
-app.get("/api/dashboard", requireApiKey, async (_req, res) => {
+app.get("/api/dashboard", requireApiKey, async (req, res) => {
+  const from = typeof req.query.from === "string" ? req.query.from : "";
+  const to = typeof req.query.to === "string" ? req.query.to : "";
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const conditions = [];
+  const values = [];
+
+  if (from) {
+    values.push(from);
+    conditions.push(`LEFT(i.invoice_date, 10) >= $${values.length}`);
+  }
+  if (to) {
+    values.push(to);
+    conditions.push(`LEFT(i.invoice_date, 10) <= $${values.length}`);
+  }
+  if (search) {
+    values.push(`%${search}%`);
+    conditions.push(
+      `(i.local_invoice_id::text ILIKE $${values.length}
+        OR EXISTS (
+          SELECT 1 FROM invoice_items search_item
+          WHERE search_item.invoice_id = i.id
+            AND search_item.product_name ILIKE $${values.length}
+        ))`
+    );
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
   try {
-    const [summary, invoices] = await Promise.all([
+    const [summary, invoices, dailySales, topProducts] = await Promise.all([
       pool.query(
         `SELECT
            COUNT(*)::integer AS invoice_count,
-           COALESCE(SUM(invoice_total), 0)::numeric AS total_sales
-         FROM invoices`
+           COALESCE(SUM(i.invoice_total), 0)::numeric AS total_sales,
+           COALESCE(AVG(i.invoice_total), 0)::numeric AS average_invoice,
+           COALESCE(SUM((
+             SELECT SUM(ii.quantity)
+             FROM invoice_items ii
+             WHERE ii.invoice_id = i.id
+           )), 0)::integer AS items_sold
+         FROM invoices i
+         ${where}`,
+        values
       ),
       pool.query(
-        `SELECT local_invoice_id, invoice_date, invoice_total, created_at
-         FROM invoices
-         ORDER BY id DESC
-         LIMIT 100`
+        `SELECT
+           i.local_invoice_id,
+           i.invoice_date,
+           i.invoice_total,
+           i.created_at,
+           COALESCE(SUM(ii.quantity), 0)::integer AS item_count
+         FROM invoices i
+         LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
+         ${where}
+         GROUP BY i.id
+         ORDER BY i.id DESC
+         LIMIT 200`,
+        values
+      ),
+      pool.query(
+        `SELECT
+           LEFT(i.invoice_date, 10) AS sale_date,
+           COUNT(*)::integer AS invoice_count,
+           SUM(i.invoice_total)::numeric AS total_sales
+         FROM invoices i
+         ${where}
+         GROUP BY LEFT(i.invoice_date, 10)
+         ORDER BY sale_date DESC
+         LIMIT 14`,
+        values
+      ),
+      pool.query(
+        `SELECT
+           ii.product_name,
+           SUM(ii.quantity)::integer AS quantity,
+           SUM(ii.quantity * ii.unit_price)::numeric AS total_sales
+         FROM invoices i
+         JOIN invoice_items ii ON ii.invoice_id = i.id
+         ${where}
+         GROUP BY ii.product_name
+         ORDER BY quantity DESC, total_sales DESC
+         LIMIT 8`,
+        values
       )
     ]);
 
     res.json({
       ok: true,
       summary: summary.rows[0],
-      invoices: invoices.rows
+      invoices: invoices.rows,
+      daily_sales: dailySales.rows.reverse(),
+      top_products: topProducts.rows
     });
   } catch (error) {
     console.error("Dashboard query failed", error);
@@ -172,29 +246,40 @@ app.get("/api/dashboard", requireApiKey, async (_req, res) => {
   }
 });
 
-app.get("/", (_req, res) => {
-  res.type("html").send(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sales System API</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f7fa; color: #17202a; }
-    main { max-width: 720px; margin: 12vh auto; padding: 32px; }
-    h1 { font-size: 32px; margin: 0 0 12px; }
-    p { color: #52606d; line-height: 1.6; }
-    strong { color: #138a52; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Sales System API</h1>
-    <p><strong>Service is running.</strong></p>
-    <p>The desktop application can send queued invoices to this server.</p>
-  </main>
-</body>
-</html>`);
+app.get("/api/invoices/:invoiceId", requireApiKey, async (req, res) => {
+  const invoiceId = Number(req.params.invoiceId);
+  if (!Number.isInteger(invoiceId)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoice ID" });
+  }
+
+  try {
+    const [invoice, items] = await Promise.all([
+      pool.query(
+        `SELECT local_invoice_id, invoice_date, invoice_total, created_at
+         FROM invoices
+         WHERE local_invoice_id = $1`,
+        [invoiceId]
+      ),
+      pool.query(
+        `SELECT ii.product_name, ii.quantity, ii.unit_price,
+                (ii.quantity * ii.unit_price)::numeric AS line_total
+         FROM invoice_items ii
+         JOIN invoices i ON i.id = ii.invoice_id
+         WHERE i.local_invoice_id = $1
+         ORDER BY ii.id`,
+        [invoiceId]
+      )
+    ]);
+
+    if (invoice.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: "Invoice not found" });
+    }
+
+    res.json({ ok: true, invoice: invoice.rows[0], items: items.rows });
+  } catch (error) {
+    console.error("Invoice detail query failed", error);
+    res.status(500).json({ ok: false, error: "Could not load invoice" });
+  }
 });
 
 app.use((error, _req, res, _next) => {

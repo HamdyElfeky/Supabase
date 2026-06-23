@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#176b4d">
+  <title>لوحة المبيعات</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="loginView" class="login-view">
+    <main class="login-panel">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <h1>نظام المبيعات</h1>
+      <p>أدخل مفتاح الدخول لعرض بيانات المتجر.</p>
+      <form id="loginForm">
+        <label for="apiKey">مفتاح الدخول</label>
+        <div class="password-field">
+          <input id="apiKey" type="password" autocomplete="current-password" required>
+          <button id="toggleKey" class="icon-button" type="button" title="إظهار أو إخفاء المفتاح">
+            <i data-lucide="eye"></i>
+          </button>
+        </div>
+        <p id="loginError" class="form-error" role="alert"></p>
+        <button class="primary-button" type="submit">
+          <i data-lucide="log-in"></i>
+          دخول
+        </button>
+      </form>
+    </main>
+  </div>
+
+  <div id="dashboardView" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div>
+          <strong>نظام المبيعات</strong>
+          <span>متابعة المتجر</span>
+        </div>
+      </div>
+      <nav aria-label="التنقل الرئيسي">
+        <a class="nav-item active" href="#overview">
+          <i data-lucide="layout-dashboard"></i>
+          نظرة عامة
+        </a>
+        <a class="nav-item" href="#invoices">
+          <i data-lucide="receipt-text"></i>
+          الفواتير
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="connectionStatus" class="connection-status">
+          <span></span>
+          متصل
+        </span>
+        <button id="logoutButton" class="ghost-button" type="button">
+          <i data-lucide="log-out"></i>
+          خروج
+        </button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">لوحة التحكم</p>
+          <h1>نظرة عامة على المبيعات</h1>
+        </div>
+        <button id="refreshButton" class="icon-button refresh-button" type="button" title="تحديث البيانات">
+          <i data-lucide="refresh-cw"></i>
+        </button>
+      </header>
+
+      <section class="filters" aria-label="تصفية المبيعات">
+        <div class="search-field">
+          <i data-lucide="search"></i>
+          <input id="searchInput" type="search" placeholder="ابحث برقم الفاتورة أو المنتج">
+        </div>
+        <label>
+          <span>من</span>
+          <input id="fromDate" type="date">
+        </label>
+        <label>
+          <span>إلى</span>
+          <input id="toDate" type="date">
+        </label>
+        <button id="clearFilters" class="secondary-button" type="button">مسح</button>
+      </section>
+
+      <section id="overview" class="metrics" aria-label="ملخص المبيعات">
+        <article class="metric">
+          <div class="metric-icon green"><i data-lucide="banknote"></i></div>
+          <div>
+            <span>إجمالي المبيعات</span>
+            <strong id="totalSales">0.00 ج.م</strong>
+          </div>
+        </article>
+        <article class="metric">
+          <div class="metric-icon blue"><i data-lucide="receipt"></i></div>
+          <div>
+            <span>عدد الفواتير</span>
+            <strong id="invoiceCount">0</strong>
+          </div>
+        </article>
+        <article class="metric">
+          <div class="metric-icon amber"><i data-lucide="shopping-basket"></i></div>
+          <div>
+            <span>القطع المباعة</span>
+            <strong id="itemsSold">0</strong>
+          </div>
+        </article>
+        <article class="metric">
+          <div class="metric-icon red"><i data-lucide="chart-no-axes-column-increasing"></i></div>
+          <div>
+            <span>متوسط الفاتورة</span>
+            <strong id="averageInvoice">0.00 ج.م</strong>
+          </div>
+        </article>
+      </section>
+
+      <section class="insights">
+        <div class="panel sales-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>المبيعات اليومية</h2>
+              <p>آخر 14 يوماً ضمن الفترة المحددة</p>
+            </div>
+          </div>
+          <div id="salesChart" class="bar-chart"></div>
+        </div>
+        <div class="panel products-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>الأكثر مبيعاً</h2>
+              <p>حسب عدد القطع</p>
+            </div>
+          </div>
+          <div id="topProducts" class="product-list"></div>
+        </div>
+      </section>
+
+      <section id="invoices" class="panel invoices-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>الفواتير</h2>
+            <p id="invoiceResultLabel">أحدث الفواتير المرفوعة</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>رقم الفاتورة</th>
+                <th>التاريخ</th>
+                <th>عدد القطع</th>
+                <th>الإجمالي</th>
+                <th><span class="sr-only">التفاصيل</span></th>
+              </tr>
+            </thead>
+            <tbody id="invoiceRows"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state" hidden>
+            <i data-lucide="inbox"></i>
+            <strong>لا توجد فواتير</strong>
+            <span>ستظهر الفواتير هنا بعد مزامنتها من جهاز البيع.</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="invoiceDialog">
+    <div class="dialog-header">
+      <div>
+        <p class="eyebrow">تفاصيل الفاتورة</p>
+        <h2 id="dialogTitle">فاتورة</h2>
+      </div>
+      <button id="closeDialog" class="icon-button" type="button" title="إغلاق">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div id="dialogMeta" class="dialog-meta"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>المنتج</th>
+            <th>الكمية</th>
+            <th>سعر الوحدة</th>
+            <th>الإجمالي</th>
+          </tr>
+        </thead>
+        <tbody id="dialogItems"></tbody>
+      </table>
+    </div>
+    <div class="dialog-total">
+      <span>إجمالي الفاتورة</span>
+      <strong id="dialogTotal">0.00 ج.م</strong>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+</body>
+</html>
