@@ -17,12 +17,12 @@
     <main class="login-panel">
       <div class="brand-mark" aria-hidden="true">S</div>
       <h1>نظام المبيعات</h1>
-      <p>أدخل مفتاح الدخول لعرض بيانات المتجر.</p>
+      <p>أدخل كلمة المرور الخاصة بك.</p>
       <form id="loginForm">
-        <label for="apiKey">مفتاح الدخول</label>
+        <label for="apiKey">كلمة المرور</label>
         <div class="password-field">
           <input id="apiKey" type="password" autocomplete="current-password" required>
-          <button id="toggleKey" class="icon-button" type="button" title="إظهار أو إخفاء المفتاح">
+          <button id="toggleKey" class="icon-button" type="button" title="إظهار أو إخفاء كلمة المرور">
             <i data-lucide="eye"></i>
           </button>
         </div>
@@ -53,12 +53,29 @@
           <i data-lucide="receipt-text"></i>
           الفواتير
         </button>
+        <button class="nav-item" type="button" data-view="products" data-permission="products:view">
+          <i data-lucide="package"></i>
+          المنتجات
+        </button>
+        <button class="nav-item" type="button" data-view="cash" data-permission="cash:view">
+          <i data-lucide="calculator"></i>
+          إقفال اليومية
+        </button>
+        <button class="nav-item" type="button" data-view="users" data-permission="users:manage">
+          <i data-lucide="users"></i>
+          المستخدمون
+        </button>
+        <button class="nav-item" type="button" data-view="logs" data-permission="logs:view">
+          <i data-lucide="history"></i>
+          سجل النشاط
+        </button>
       </nav>
       <div class="sidebar-footer">
         <span id="connectionStatus" class="connection-status">
           <span></span>
           متصل
         </span>
+        <div id="currentUser" class="current-user"></div>
         <button id="logoutButton" class="ghost-button" type="button">
           <i data-lucide="log-out"></i>
           خروج
@@ -137,6 +154,24 @@
               </div>
             </div>
             <div id="topProducts" class="product-list"></div>
+          </div>
+        </section>
+
+        <section class="panel daily-report-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>تقرير اليوم</h2>
+              <p id="todayReportDate">النقدية المتوقعة حسب مبيعات اليوم</p>
+            </div>
+            <button class="text-button" type="button" data-open-view="cash">
+              إقفال اليومية
+              <i data-lucide="arrow-left"></i>
+            </button>
+          </div>
+          <div class="daily-report-grid">
+            <div><span>المبلغ المتوقع</span><strong id="todayExpectedCash">0.00 ج.م</strong></div>
+            <div><span>المبلغ الموجود</span><strong id="todayActualCash">لم يتم الإدخال</strong></div>
+            <div><span>العجز أو الزيادة</span><strong id="todayVariance">—</strong></div>
           </div>
         </section>
 
@@ -231,6 +266,94 @@
           </div>
         </section>
       </section>
+
+      <section id="productsView" class="page-view" hidden>
+        <div class="section-toolbar">
+          <div class="search-field">
+            <i data-lucide="search"></i>
+            <input id="productSearch" type="search" placeholder="ابحث باسم المنتج أو الباركود">
+          </div>
+          <button id="addProductButton" class="primary-action-button" type="button" data-permission="products:manage">
+            <i data-lucide="plus"></i>
+            منتج جديد
+          </button>
+        </div>
+        <section class="product-stats">
+          <div><span>إجمالي المنتجات</span><strong id="productCount">0</strong></div>
+          <div><span>مخزون منخفض</span><strong id="lowStockCount">0</strong></div>
+          <div><span>قيمة المخزون بالتكلفة</span><strong id="stockCostValue">0.00 ج.م</strong></div>
+          <div><span>الربح المتوقع</span><strong id="expectedProfit">0.00 ج.م</strong></div>
+        </section>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>المنتج</th><th>الباركود</th><th>سعر البيع</th><th>التكلفة</th>
+                <th>المخزون</th><th>الحالة</th><th></th>
+              </tr></thead>
+              <tbody id="productRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="cashView" class="page-view" hidden>
+        <div class="cash-date-toolbar">
+          <label><span>تاريخ التقرير</span><input id="cashDate" type="date"></label>
+          <button id="loadCashReport" class="secondary-button" type="button">
+            <i data-lucide="refresh-cw"></i>
+            عرض التقرير
+          </button>
+        </div>
+        <section class="cash-report-grid">
+          <article><span>المبيعات المتوقعة</span><strong id="cashExpected">0.00 ج.م</strong></article>
+          <article><span>عدد الفواتير</span><strong id="cashInvoiceCount">0</strong></article>
+          <article><span>النقدية الفعلية</span><strong id="cashActual">—</strong></article>
+          <article id="cashVarianceCard"><span>الفرق</span><strong id="cashVariance">—</strong></article>
+        </section>
+        <section class="panel cash-close-panel" data-permission="cash:close">
+          <div class="panel-heading"><div><h2>إقفال اليومية</h2><p>أدخل المبلغ الذي وجدته فعلياً في الدرج</p></div></div>
+          <form id="cashCloseForm">
+            <label><span>المبلغ الفعلي</span><input id="actualCashInput" type="number" min="0" step="0.01" required></label>
+            <label><span>ملاحظات</span><textarea id="cashNotes" rows="3" placeholder="سبب العجز أو الزيادة إن وجد"></textarea></label>
+            <button class="primary-action-button" type="submit"><i data-lucide="check"></i> حفظ الإقفال</button>
+          </form>
+          <p id="cashClosedInfo" class="muted-line"></p>
+        </section>
+      </section>
+
+      <section id="usersView" class="page-view" hidden>
+        <div class="section-toolbar">
+          <div><h2>المستخدمون والصلاحيات</h2><p class="muted-line">كل مستخدم يدخل بكلمة مروره فقط.</p></div>
+          <button id="addUserButton" class="primary-action-button" type="button">
+            <i data-lucide="user-plus"></i>
+            مستخدم جديد
+          </button>
+        </div>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>الاسم</th><th>الصلاحية</th><th>آخر دخول</th><th>الحالة</th><th></th></tr></thead>
+              <tbody id="userRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="logsView" class="page-view" hidden>
+        <div class="section-toolbar">
+          <div><h2>سجل النشاط</h2><p class="muted-line">الدخول والتعديلات والإقفالات المسجلة.</p></div>
+          <button id="refreshLogs" class="secondary-button" type="button"><i data-lucide="refresh-cw"></i> تحديث</button>
+        </div>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>التفاصيل</th><th>IP</th></tr></thead>
+              <tbody id="logRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </main>
   </div>
 
@@ -272,6 +395,49 @@
         طباعة
       </button>
     </div>
+  </dialog>
+
+  <dialog id="productDialog" class="form-dialog">
+    <form id="productForm">
+      <div class="dialog-header">
+        <div><p class="eyebrow">إدارة المنتجات</p><h2 id="productDialogTitle">منتج جديد</h2></div>
+        <button class="icon-button dialog-close" type="button" title="إغلاق"><i data-lucide="x"></i></button>
+      </div>
+      <div class="form-grid">
+        <label class="full"><span>اسم المنتج</span><input id="productName" required></label>
+        <label><span>الباركود</span><input id="productBarcode"></label>
+        <label><span>الكمية الحالية</span><input id="productStock" type="number" step="1" required></label>
+        <label><span>سعر البيع</span><input id="productSalePrice" type="number" min="0" step="0.01" required></label>
+        <label><span>سعر التكلفة</span><input id="productCostPrice" type="number" min="0" step="0.01" required></label>
+        <label><span>تنبيه المخزون عند</span><input id="productLowStock" type="number" min="0" step="1" required></label>
+        <label class="toggle-label"><input id="productActive" type="checkbox" checked> <span>المنتج نشط</span></label>
+      </div>
+      <div class="dialog-actions"><button class="primary-action-button" type="submit"><i data-lucide="save"></i> حفظ</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="userDialog" class="form-dialog">
+    <form id="userForm">
+      <div class="dialog-header">
+        <div><p class="eyebrow">إدارة المستخدمين</p><h2 id="userDialogTitle">مستخدم جديد</h2></div>
+        <button class="icon-button dialog-close" type="button" title="إغلاق"><i data-lucide="x"></i></button>
+      </div>
+      <div class="form-grid">
+        <label class="full"><span>اسم المستخدم للعرض</span><input id="userDisplayName" required></label>
+        <label><span>الصلاحية</span>
+          <select id="userRole">
+            <option value="admin">مدير كامل</option>
+            <option value="manager">مدير تشغيل</option>
+            <option value="cashier">كاشير</option>
+            <option value="viewer">مشاهدة فقط</option>
+          </select>
+        </label>
+        <label><span>كلمة المرور</span><input id="userPassword" type="password" minlength="6"></label>
+        <label class="toggle-label full"><input id="userActive" type="checkbox" checked> <span>الحساب نشط</span></label>
+      </div>
+      <div class="password-hint">يجب أن تكون كلمة المرور مختلفة عن كلمات مرور كل المستخدمين.</div>
+      <div class="dialog-actions"><button class="primary-action-button" type="submit"><i data-lucide="save"></i> حفظ</button></div>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status"></div>

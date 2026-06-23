@@ -265,6 +265,24 @@ button svg,
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.current-user {
+  padding: 10px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.current-user strong,
+.current-user span {
+  display: block;
+}
+
+.current-user span {
+  margin-top: 2px;
+  color: #9fb6ae;
+  font-size: 12px;
+}
+
 .connection-status {
   display: flex;
   align-items: center;
@@ -592,9 +610,12 @@ button svg,
 
 .recent-invoices {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(210px, 1fr);
   gap: 12px;
   padding: 16px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
 }
 
 .recent-invoice {
@@ -602,6 +623,7 @@ button svg,
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-soft);
+  scroll-snap-align: start;
 }
 
 .recent-invoice button {
@@ -663,6 +685,205 @@ button svg,
   border: 1px solid var(--border);
   border-radius: 7px;
   background: white;
+}
+
+.daily-report-panel {
+  margin-top: 14px;
+}
+
+.daily-report-grid,
+.product-stats,
+.cash-report-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.daily-report-grid > div,
+.product-stats > div,
+.cash-report-grid > article {
+  padding: 18px 20px;
+  border-left: 1px solid var(--border);
+}
+
+.daily-report-grid > div:last-child,
+.product-stats > div:last-child,
+.cash-report-grid > article:last-child {
+  border-left: 0;
+}
+
+.daily-report-grid span,
+.daily-report-grid strong,
+.product-stats span,
+.product-stats strong,
+.cash-report-grid span,
+.cash-report-grid strong {
+  display: block;
+}
+
+.daily-report-grid span,
+.product-stats span,
+.cash-report-grid span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.daily-report-grid strong,
+.product-stats strong,
+.cash-report-grid strong {
+  margin-top: 5px;
+  font-size: 19px;
+}
+
+.positive,
+.surplus strong {
+  color: var(--green);
+}
+
+.negative,
+.shortage strong {
+  color: #b43a3a;
+}
+
+.section-toolbar,
+.cash-date-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 28px 0 14px;
+}
+
+.section-toolbar .search-field {
+  width: min(520px, 100%);
+}
+
+.product-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: white;
+}
+
+.stock-badge,
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stock-badge {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.stock-badge.low {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.status-badge.active {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.status-badge.inactive {
+  background: #edf0f2;
+  color: var(--muted);
+}
+
+.cash-date-toolbar {
+  justify-content: flex-start;
+}
+
+.cash-date-toolbar label,
+.form-grid label,
+.cash-close-panel label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cash-date-toolbar input,
+.form-grid input,
+.form-grid select,
+.cash-close-panel input,
+.cash-close-panel textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: 0;
+  background: white;
+}
+
+.cash-report-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: white;
+}
+
+.cash-close-panel {
+  margin-top: 14px;
+}
+
+.cash-close-panel form {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  padding: 20px;
+}
+
+.muted-line,
+.password-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.cash-close-panel > .muted-line {
+  padding: 0 20px 18px;
+}
+
+.form-dialog {
+  width: min(650px, calc(100% - 28px));
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 20px 22px;
+}
+
+.form-grid .full {
+  grid-column: 1 / -1;
+}
+
+.toggle-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-label input {
+  width: 18px;
+  min-height: 18px;
+}
+
+.password-hint {
+  padding: 0 22px;
 }
 
 .invoice-summary-strip > div {
@@ -894,7 +1115,16 @@ dialog::backdrop {
   }
 
   .recent-invoices {
+    grid-auto-columns: minmax(220px, 75vw);
+  }
+
+  .product-stats,
+  .cash-report-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cash-close-panel form {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -911,9 +1141,27 @@ dialog::backdrop {
   }
 
   .brand span,
-  .sidebar nav,
   .sidebar-footer {
     display: none;
+  }
+
+  .sidebar nav {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 0 12px;
+    white-space: nowrap;
+  }
+
+  .section-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .content {
@@ -977,7 +1225,10 @@ dialog::backdrop {
   .filters,
   .invoice-tools,
   .invoice-summary-strip,
-  .recent-invoices {
+  .product-stats,
+  .cash-report-grid,
+  .daily-report-grid,
+  .form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -993,6 +1244,23 @@ dialog::backdrop {
 
   .invoice-summary-strip > div:last-child {
     border-bottom: 0;
+  }
+
+  .product-stats > div,
+  .cash-report-grid > article,
+  .daily-report-grid > div {
+    border-left: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .product-stats > div:last-child,
+  .cash-report-grid > article:last-child,
+  .daily-report-grid > div:last-child {
+    border-bottom: 0;
+  }
+
+  .form-grid .full {
+    grid-column: auto;
   }
 
   .login-panel {

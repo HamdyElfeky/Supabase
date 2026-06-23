@@ -1,6 +1,9 @@
 const express = require("express");
 const { Pool } = require("pg");
 const path = require("path");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const fs = require("fs");
 
 const app = express();
 const port = Number(process.env.PORT || 10000);
@@ -20,6 +23,15 @@ const pool = new Pool({
   ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false }
 });
 
+const rolePermissions = {
+  admin: ["dashboard:view", "invoices:view", "products:view", "products:manage",
+    "users:manage", "logs:view", "cash:view", "cash:close"],
+  manager: ["dashboard:view", "invoices:view", "products:view", "products:manage",
+    "logs:view", "cash:view", "cash:close"],
+  cashier: ["dashboard:view", "invoices:view", "products:view", "cash:view", "cash:close"],
+  viewer: ["dashboard:view", "invoices:view", "products:view", "cash:view"]
+};
+
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -29,6 +41,96 @@ function requireApiKey(req, res, next) {
     return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
   next();
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function publicUser(user) {
+  return {
+    id: Number(user.id),
+    display_name: user.display_name,
+    role: user.role,
+    active: user.active,
+    last_login_at: user.last_login_at,
+    created_at: user.created_at,
+    permissions: rolePermissions[user.role] || []
+  };
+}
+
+async function requireSession(req, res, next) {
+  const authorization = req.get("Authorization") || "";
+  if (!authorization.startsWith("Bearer ")) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT u.*
+       FROM user_sessions s
+       JOIN app_users u ON u.id = s.user_id
+       WHERE s.token_hash = $1 AND s.expires_at > NOW() AND u.active = TRUE`,
+      [hashToken(authorization.slice(7))]
+    );
+    if (result.rowCount === 0) {
+      return res.status(401).json({ ok: false, error: "Session expired" });
+    }
+    req.user = result.rows[0];
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function requirePermission(permission) {
+  return (req, res, next) => {
+    const permissions = rolePermissions[req.user?.role] || [];
+    if (!permissions.includes(permission)) {
+      return res.status(403).json({ ok: false, error: "Permission denied" });
+    }
+    next();
+  };
+}
+
+async function writeLog(req, action, entityType = null, entityId = null, details = {}) {
+  try {
+    await pool.query(
+      `INSERT INTO activity_logs
+         (user_id, action, entity_type, entity_id, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [req.user?.id || null, action, entityType, entityId == null ? null : String(entityId),
+        JSON.stringify(details), req.ip]
+    );
+  } catch (error) {
+    console.error("Activity log failed", error);
+  }
+}
+
+async function passwordAlreadyUsed(password, excludeUserId = null) {
+  const result = await pool.query(
+    `SELECT id, password_hash FROM app_users
+     WHERE ($1::bigint IS NULL OR id <> $1)`,
+    [excludeUserId]
+  );
+  for (const user of result.rows) {
+    if (await bcrypt.compare(password, user.password_hash)) return true;
+  }
+  return false;
+}
+
+async function ensureSchema() {
+  await pool.query(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+  const existing = await pool.query("SELECT COUNT(*)::integer AS count FROM app_users");
+  if (existing.rows[0].count === 0) {
+    const passwordHash = await bcrypt.hash(apiKey, 12);
+    await pool.query(
+      `INSERT INTO app_users (display_name, password_hash, role)
+       VALUES ('المدير', $1, 'admin')`,
+      [passwordHash]
+    );
+    console.log("Created initial admin account");
+  }
 }
 
 function validateInvoiceEvent(body) {
@@ -146,7 +248,283 @@ app.post(["/api/sync_push", "/api/sync_push.php"], requireApiKey, async (req, re
   }
 });
 
-app.get("/api/dashboard", requireApiKey, async (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  if (!password) {
+    return res.status(400).json({ ok: false, error: "Password is required" });
+  }
+
+  try {
+    const users = await pool.query("SELECT * FROM app_users WHERE active = TRUE ORDER BY id");
+    let matchedUser = null;
+    for (const user of users.rows) {
+      if (await bcrypt.compare(password, user.password_hash)) {
+        matchedUser = user;
+        break;
+      }
+    }
+    if (!matchedUser) {
+      await writeLog(req, "LOGIN_FAILED", "auth", null);
+      return res.status(401).json({ ok: false, error: "Invalid password" });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO user_sessions (user_id, token_hash, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '30 days')`,
+        [matchedUser.id, hashToken(token)]
+      );
+      await client.query(
+        "UPDATE app_users SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1",
+        [matchedUser.id]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    req.user = matchedUser;
+    await writeLog(req, "LOGIN_SUCCESS", "auth", matchedUser.id);
+    res.json({ ok: true, token, user: publicUser(matchedUser) });
+  } catch (error) {
+    console.error("Login failed", error);
+    res.status(500).json({ ok: false, error: "Login failed" });
+  }
+});
+
+app.get("/api/auth/me", requireSession, (req, res) => {
+  res.json({ ok: true, user: publicUser(req.user) });
+});
+
+app.post("/api/auth/logout", requireSession, async (req, res) => {
+  const token = (req.get("Authorization") || "").slice(7);
+  await pool.query("DELETE FROM user_sessions WHERE token_hash = $1", [hashToken(token)]);
+  await writeLog(req, "LOGOUT", "auth", req.user.id);
+  res.json({ ok: true });
+});
+
+app.get("/api/users", requireSession, requirePermission("users:manage"), async (_req, res) => {
+  const result = await pool.query(
+    `SELECT id, display_name, role, active, last_login_at, created_at, updated_at
+     FROM app_users ORDER BY id`
+  );
+  res.json({ ok: true, users: result.rows.map(publicUser) });
+});
+
+app.post("/api/users", requireSession, requirePermission("users:manage"), async (req, res) => {
+  const displayName = typeof req.body?.display_name === "string" ? req.body.display_name.trim() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  const role = req.body?.role;
+  if (!displayName || password.length < 6 || !rolePermissions[role]) {
+    return res.status(400).json({ ok: false, error: "Invalid user data" });
+  }
+  if (await passwordAlreadyUsed(password)) {
+    return res.status(409).json({ ok: false, error: "Password is already used" });
+  }
+  const passwordHash = await bcrypt.hash(password, 12);
+  const result = await pool.query(
+    `INSERT INTO app_users (display_name, password_hash, role)
+     VALUES ($1, $2, $3)
+     RETURNING id, display_name, role, active, last_login_at, created_at`,
+    [displayName, passwordHash, role]
+  );
+  await writeLog(req, "USER_CREATED", "user", result.rows[0].id,
+    { display_name: displayName, role });
+  res.status(201).json({ ok: true, user: publicUser(result.rows[0]) });
+});
+
+app.patch("/api/users/:userId", requireSession, requirePermission("users:manage"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId)) {
+    return res.status(400).json({ ok: false, error: "Invalid user ID" });
+  }
+  if (userId === Number(req.user.id) && req.body.active === false) {
+    return res.status(400).json({ ok: false, error: "You cannot disable your own account" });
+  }
+
+  const current = await pool.query("SELECT * FROM app_users WHERE id = $1", [userId]);
+  if (current.rowCount === 0) {
+    return res.status(404).json({ ok: false, error: "User not found" });
+  }
+
+  const displayName = typeof req.body.display_name === "string"
+    ? req.body.display_name.trim() : current.rows[0].display_name;
+  const role = rolePermissions[req.body.role] ? req.body.role : current.rows[0].role;
+  const active = typeof req.body.active === "boolean" ? req.body.active : current.rows[0].active;
+  let passwordHash = current.rows[0].password_hash;
+  if (typeof req.body.password === "string" && req.body.password.length > 0) {
+    if (req.body.password.length < 6) {
+      return res.status(400).json({ ok: false, error: "Password is too short" });
+    }
+    if (await passwordAlreadyUsed(req.body.password, userId)) {
+      return res.status(409).json({ ok: false, error: "Password is already used" });
+    }
+    passwordHash = await bcrypt.hash(req.body.password, 12);
+  }
+
+  const result = await pool.query(
+    `UPDATE app_users
+     SET display_name = $1, role = $2, active = $3, password_hash = $4, updated_at = NOW()
+     WHERE id = $5
+     RETURNING id, display_name, role, active, last_login_at, created_at`,
+    [displayName, role, active, passwordHash, userId]
+  );
+  if (!active || passwordHash !== current.rows[0].password_hash) {
+    await pool.query("DELETE FROM user_sessions WHERE user_id = $1 AND user_id <> $2", [userId, req.user.id]);
+  }
+  await writeLog(req, "USER_UPDATED", "user", userId, { display_name: displayName, role, active });
+  res.json({ ok: true, user: publicUser(result.rows[0]) });
+});
+
+app.get("/api/logs", requireSession, requirePermission("logs:view"), async (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  const result = await pool.query(
+    `SELECT l.id, l.action, l.entity_type, l.entity_id, l.details, l.ip_address,
+            l.created_at, u.display_name
+     FROM activity_logs l
+     LEFT JOIN app_users u ON u.id = l.user_id
+     ORDER BY l.id DESC LIMIT $1`,
+    [limit]
+  );
+  res.json({ ok: true, logs: result.rows });
+});
+
+app.get("/api/products", requireSession, requirePermission("products:view"), async (req, res) => {
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const values = [];
+  let where = "";
+  if (search) {
+    values.push(`%${search}%`);
+    where = "WHERE name ILIKE $1 OR COALESCE(barcode, '') ILIKE $1";
+  }
+  const result = await pool.query(
+    `SELECT * FROM products ${where} ORDER BY active DESC, name LIMIT 500`,
+    values
+  );
+  res.json({ ok: true, products: result.rows });
+});
+
+app.post("/api/products", requireSession, requirePermission("products:manage"), async (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const salePrice = Number(req.body?.sale_price);
+  const costPrice = Number(req.body?.cost_price || 0);
+  const stock = Number(req.body?.stock_quantity || 0);
+  const lowStock = Number(req.body?.low_stock_limit ?? 5);
+  if (!name || !Number.isFinite(salePrice) || salePrice < 0 ||
+      !Number.isFinite(costPrice) || costPrice < 0 ||
+      !Number.isInteger(stock) || !Number.isInteger(lowStock)) {
+    return res.status(400).json({ ok: false, error: "Invalid product data" });
+  }
+  const result = await pool.query(
+    `INSERT INTO products (name, barcode, sale_price, cost_price, stock_quantity, low_stock_limit)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [name, req.body.barcode || null, salePrice, costPrice, stock, lowStock]
+  );
+  await writeLog(req, "PRODUCT_CREATED", "product", result.rows[0].id, { name });
+  res.status(201).json({ ok: true, product: result.rows[0] });
+});
+
+app.patch("/api/products/:productId", requireSession, requirePermission("products:manage"), async (req, res) => {
+  const productId = Number(req.params.productId);
+  const current = await pool.query("SELECT * FROM products WHERE id = $1", [productId]);
+  if (current.rowCount === 0) {
+    return res.status(404).json({ ok: false, error: "Product not found" });
+  }
+  const product = current.rows[0];
+  const values = {
+    name: typeof req.body.name === "string" ? req.body.name.trim() : product.name,
+    barcode: req.body.barcode === undefined ? product.barcode : (req.body.barcode || null),
+    sale_price: req.body.sale_price === undefined ? product.sale_price : Number(req.body.sale_price),
+    cost_price: req.body.cost_price === undefined ? product.cost_price : Number(req.body.cost_price),
+    stock_quantity: req.body.stock_quantity === undefined
+      ? product.stock_quantity : Number(req.body.stock_quantity),
+    low_stock_limit: req.body.low_stock_limit === undefined
+      ? product.low_stock_limit : Number(req.body.low_stock_limit),
+    active: typeof req.body.active === "boolean" ? req.body.active : product.active
+  };
+  if (!values.name || !Number.isFinite(Number(values.sale_price)) ||
+      !Number.isFinite(Number(values.cost_price)) ||
+      !Number.isInteger(values.stock_quantity) || !Number.isInteger(values.low_stock_limit)) {
+    return res.status(400).json({ ok: false, error: "Invalid product data" });
+  }
+  const result = await pool.query(
+    `UPDATE products SET name=$1, barcode=$2, sale_price=$3, cost_price=$4,
+       stock_quantity=$5, low_stock_limit=$6, active=$7, updated_at=NOW()
+     WHERE id=$8 RETURNING *`,
+    [values.name, values.barcode, values.sale_price, values.cost_price,
+      values.stock_quantity, values.low_stock_limit, values.active, productId]
+  );
+  await writeLog(req, "PRODUCT_UPDATED", "product", productId, { name: values.name });
+  res.json({ ok: true, product: result.rows[0] });
+});
+
+app.get("/api/products-sync", requireApiKey, async (_req, res) => {
+  const result = await pool.query(
+    `SELECT id, local_product_id, name, barcode, sale_price, stock_quantity, active, updated_at
+     FROM products ORDER BY id`
+  );
+  res.json({ ok: true, products: result.rows });
+});
+
+app.get("/api/cash-report", requireSession, requirePermission("cash:view"), async (req, res) => {
+  const date = typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10);
+  const [sales, closure] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::integer AS invoice_count,
+              COALESCE(SUM(invoice_total), 0)::numeric AS expected_cash
+       FROM invoices WHERE LEFT(invoice_date, 10) = $1`,
+      [date]
+    ),
+    pool.query(
+      `SELECT c.*, u.display_name AS closed_by_name
+       FROM daily_cash_closures c LEFT JOIN app_users u ON u.id = c.closed_by
+       WHERE c.business_date = $1`,
+      [date]
+    )
+  ]);
+  const report = sales.rows[0];
+  const close = closure.rows[0] || null;
+  res.json({
+    ok: true,
+    report: {
+      business_date: date,
+      invoice_count: report.invoice_count,
+      expected_cash: report.expected_cash,
+      actual_cash: close?.actual_cash ?? null,
+      variance: close ? Number(close.actual_cash) - Number(report.expected_cash) : null,
+      notes: close?.notes || "",
+      closed_by_name: close?.closed_by_name || null,
+      closed_at: close?.updated_at || null
+    }
+  });
+});
+
+app.post("/api/cash-report/close", requireSession, requirePermission("cash:close"), async (req, res) => {
+  const date = typeof req.body?.business_date === "string"
+    ? req.body.business_date : new Date().toISOString().slice(0, 10);
+  const actualCash = Number(req.body?.actual_cash);
+  if (!Number.isFinite(actualCash) || actualCash < 0) {
+    return res.status(400).json({ ok: false, error: "Invalid actual cash" });
+  }
+  const result = await pool.query(
+    `INSERT INTO daily_cash_closures (business_date, actual_cash, notes, closed_by)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (business_date) DO UPDATE SET
+       actual_cash=EXCLUDED.actual_cash, notes=EXCLUDED.notes,
+       closed_by=EXCLUDED.closed_by, updated_at=NOW()
+     RETURNING *`,
+    [date, actualCash, req.body.notes || null, req.user.id]
+  );
+  await writeLog(req, "CASH_CLOSED", "cash_closure", date, { actual_cash: actualCash });
+  res.json({ ok: true, closure: result.rows[0] });
+});
+
+app.get("/api/dashboard", requireSession, requirePermission("dashboard:view"), async (req, res) => {
   const from = typeof req.query.from === "string" ? req.query.from : "";
   const to = typeof req.query.to === "string" ? req.query.to : "";
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
@@ -246,7 +624,7 @@ app.get("/api/dashboard", requireApiKey, async (req, res) => {
   }
 });
 
-app.get("/api/invoices/:invoiceId", requireApiKey, async (req, res) => {
+app.get("/api/invoices/:invoiceId", requireSession, requirePermission("invoices:view"), async (req, res) => {
   const invoiceId = Number(req.params.invoiceId);
   if (!Number.isInteger(invoiceId)) {
     return res.status(400).json({ ok: false, error: "Invalid invoice ID" });
@@ -290,6 +668,13 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ ok: false, error: "Internal server error" });
 });
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Sales System API listening on port ${port}`);
-});
+ensureSchema()
+  .then(() => {
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Sales System API listening on port ${port}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Database initialization failed", error);
+    process.exitCode = 1;
+  });

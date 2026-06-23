@@ -1,11 +1,16 @@
 const state = {
-  apiKey: sessionStorage.getItem("salesApiKey") || "",
-  currentView: location.hash === "#invoices" ? "invoices" : "overview",
+  token: localStorage.getItem("salesSession") || "",
+  user: null,
+  currentView: location.hash.slice(1) || "overview",
   invoices: [],
+  products: [],
+  users: [],
   page: 1,
   pageSize: 20,
   searchTimer: null,
-  selectedInvoiceId: null
+  selectedInvoiceId: null,
+  editingProductId: null,
+  editingUserId: null
 };
 
 const elements = {};
@@ -14,14 +19,23 @@ document.addEventListener("DOMContentLoaded", () => {
   const ids = [
     "loginView", "dashboardView", "loginForm", "loginError", "apiKey", "toggleKey",
     "logoutButton", "refreshButton", "connectionStatus", "lastUpdated", "pageEyebrow",
-    "pageTitle", "overviewView", "invoicesView", "showAllInvoices", "searchInput",
+    "pageTitle", "overviewView", "invoicesView", "productsView", "cashView", "usersView",
+    "logsView", "currentUser", "showAllInvoices", "searchInput",
     "fromDate", "toDate", "invoiceSort", "clearFilters", "exportInvoices",
     "totalSales", "invoiceCount", "itemsSold", "averageInvoice", "salesChart",
     "topProducts", "recentInvoices", "invoiceRows", "invoiceResultLabel", "emptyState",
     "filteredInvoiceCount", "filteredInvoiceTotal", "largestInvoice", "previousPage",
     "nextPage", "pageLabel", "invoiceDialog", "closeDialog", "dialogTitle",
     "dialogMeta", "dialogItems", "dialogTotal", "copyInvoiceNumber", "printInvoice",
-    "toast"
+    "todayReportDate", "todayExpectedCash", "todayActualCash", "todayVariance",
+    "productSearch", "addProductButton", "productCount", "lowStockCount", "stockCostValue",
+    "expectedProfit", "productRows", "cashDate", "loadCashReport", "cashExpected",
+    "cashInvoiceCount", "cashActual", "cashVariance", "cashVarianceCard", "cashCloseForm",
+    "actualCashInput", "cashNotes", "cashClosedInfo", "addUserButton", "userRows",
+    "refreshLogs", "logRows", "productDialog", "productForm", "productDialogTitle",
+    "productName", "productBarcode", "productStock", "productSalePrice", "productCostPrice",
+    "productLowStock", "productActive", "userDialog", "userForm", "userDialogTitle",
+    "userDisplayName", "userRole", "userPassword", "userActive", "toast"
   ];
   ids.forEach((id) => { elements[id] = document.querySelector(`#${id}`); });
   elements.navItems = [...document.querySelectorAll("[data-view]")];
@@ -30,11 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   refreshIcons();
 
-  if (state.apiKey) {
-    showDashboard();
-    switchView(state.currentView, false);
-    loadDashboard();
-  }
+  if (state.token) restoreSession();
 });
 
 function bindEvents() {
@@ -50,6 +60,9 @@ function bindEvents() {
   });
   elements.navItems.forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.view));
+  });
+  document.querySelectorAll("[data-open-view]").forEach((button) => {
+    button.addEventListener("click", () => switchView(button.dataset.openView));
   });
   elements.showAllInvoices.addEventListener("click", () => switchView("invoices"));
   elements.periodButtons.forEach((button) => {
@@ -74,28 +87,64 @@ function bindEvents() {
   elements.nextPage.addEventListener("click", () => changePage(1));
   elements.copyInvoiceNumber.addEventListener("click", copyInvoiceNumber);
   elements.printInvoice.addEventListener("click", () => window.print());
+  elements.productSearch.addEventListener("input", renderProductsTable);
+  elements.addProductButton.addEventListener("click", () => openProductForm());
+  elements.productForm.addEventListener("submit", saveProduct);
+  elements.loadCashReport.addEventListener("click", loadCashReport);
+  elements.cashDate.addEventListener("change", loadCashReport);
+  elements.cashCloseForm.addEventListener("submit", closeCashDay);
+  elements.addUserButton.addEventListener("click", () => openUserForm());
+  elements.userForm.addEventListener("submit", saveUser);
+  elements.refreshLogs.addEventListener("click", loadLogs);
+  document.querySelectorAll(".dialog-close").forEach((button) => {
+    button.addEventListener("click", () => button.closest("dialog").close());
+  });
   window.addEventListener("hashchange", () => {
-    switchView(location.hash === "#invoices" ? "invoices" : "overview", false);
+    switchView(location.hash.slice(1) || "overview", false);
   });
 }
 
 async function handleLogin(event) {
   event.preventDefault();
   elements.loginError.textContent = "";
-  state.apiKey = elements.apiKey.value.trim();
-  if (!state.apiKey) return;
+  const password = elements.apiKey.value;
+  if (!password) return;
 
   try {
-    await apiFetch("/api/ping.php");
-    sessionStorage.setItem("salesApiKey", state.apiKey);
+    const data = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+      skipAuth: true
+    });
+    state.token = data.token;
+    state.user = data.user;
+    localStorage.setItem("salesSession", state.token);
     showDashboard();
+    applyPermissions();
     switchView(state.currentView, false);
-    await loadDashboard();
+    await loadInitialData();
   } catch (error) {
-    state.apiKey = "";
     elements.loginError.textContent =
-      error.status === 401 ? "مفتاح الدخول غير صحيح." : "تعذر الاتصال بالخادم.";
+      error.status === 401 ? "كلمة المرور غير صحيحة." : "تعذر الاتصال بالخادم.";
   }
+}
+
+async function restoreSession() {
+  try {
+    const data = await apiFetch("/api/auth/me");
+    state.user = data.user;
+    showDashboard();
+    applyPermissions();
+    switchView(state.currentView, false);
+    await loadInitialData();
+  } catch {
+    logout(false);
+  }
+}
+
+async function loadInitialData() {
+  elements.cashDate.value = localDate(new Date());
+  await Promise.all([loadDashboard(), loadCashReport()]);
 }
 
 function showDashboard() {
@@ -104,34 +153,56 @@ function showDashboard() {
   refreshIcons();
 }
 
-function logout() {
-  sessionStorage.removeItem("salesApiKey");
-  state.apiKey = "";
+async function logout(callServer = true) {
+  if (callServer && state.token) {
+    apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+  }
+  localStorage.removeItem("salesSession");
+  state.token = "";
+  state.user = null;
   elements.apiKey.value = "";
   elements.dashboardView.hidden = true;
   elements.loginView.hidden = false;
 }
 
 function switchView(view, updateHash = true) {
-  state.currentView = view === "invoices" ? "invoices" : "overview";
-  const invoicesActive = state.currentView === "invoices";
-  elements.overviewView.hidden = invoicesActive;
-  elements.invoicesView.hidden = !invoicesActive;
-  elements.pageEyebrow.textContent = invoicesActive ? "إدارة المبيعات" : "لوحة التحكم";
-  elements.pageTitle.textContent = invoicesActive ? "الفواتير" : "نظرة عامة على المبيعات";
+  const titles = {
+    overview: ["لوحة التحكم", "نظرة عامة على المبيعات"],
+    invoices: ["إدارة المبيعات", "الفواتير"],
+    products: ["إدارة المخزون", "المنتجات"],
+    cash: ["المراجعة اليومية", "إقفال اليومية"],
+    users: ["إدارة النظام", "المستخدمون والصلاحيات"],
+    logs: ["مراقبة النظام", "سجل النشاط"]
+  };
+  if (!titles[view] || !canOpenView(view)) view = "overview";
+  state.currentView = view;
+  document.querySelectorAll(".page-view").forEach((section) => {
+    section.hidden = section.id !== `${view}View`;
+  });
+  elements.pageEyebrow.textContent = titles[view][0];
+  elements.pageTitle.textContent = titles[view][1];
   elements.navItems.forEach((button) => {
     button.classList.toggle("active", button.dataset.view === state.currentView);
   });
   if (updateHash) {
-    history.pushState(null, "", invoicesActive ? "#invoices" : "#overview");
+    history.pushState(null, "", `#${view}`);
   }
-  if (invoicesActive) renderInvoicePage();
+  if (view === "invoices") renderInvoicePage();
+  if (view === "products") loadProducts();
+  if (view === "cash") loadCashReport();
+  if (view === "users") loadUsers();
+  if (view === "logs") loadLogs();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-async function apiFetch(url) {
+async function apiFetch(url, options = {}) {
   const response = await fetch(url, {
-    headers: { "X-Api-Key": state.apiKey }
+    method: options.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.skipAuth ? {} : { Authorization: `Bearer ${state.token}` })
+    },
+    body: options.body
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -140,6 +211,28 @@ async function apiFetch(url) {
     throw error;
   }
   return data;
+}
+
+function applyPermissions() {
+  const permissions = state.user?.permissions || [];
+  document.querySelectorAll("[data-permission]").forEach((element) => {
+    element.hidden = !permissions.includes(element.dataset.permission);
+  });
+  elements.currentUser.innerHTML = `
+    <strong>${escapeHtml(state.user.display_name)}</strong>
+    <span>${escapeHtml(roleName(state.user.role))}</span>`;
+}
+
+function can(permission) {
+  return state.user?.permissions?.includes(permission);
+}
+
+function canOpenView(view) {
+  const permission = {
+    overview: "dashboard:view", invoices: "invoices:view", products: "products:view",
+    cash: "cash:view", users: "users:manage", logs: "logs:view"
+  }[view];
+  return can(permission);
 }
 
 async function loadDashboard() {
@@ -394,6 +487,215 @@ function exportCsv() {
   URL.revokeObjectURL(link.href);
 }
 
+async function loadProducts() {
+  if (!can("products:view")) return;
+  try {
+    const data = await apiFetch("/api/products");
+    state.products = data.products;
+    renderProductsTable();
+  } catch {
+    showToast("تعذر تحميل المنتجات.");
+  }
+}
+
+function renderProductsTable() {
+  const query = elements.productSearch.value.trim().toLowerCase();
+  const products = state.products.filter((product) =>
+    !query || product.name.toLowerCase().includes(query) ||
+    String(product.barcode || "").toLowerCase().includes(query)
+  );
+  const lowStock = state.products.filter((product) =>
+    product.active && Number(product.stock_quantity) <= Number(product.low_stock_limit)
+  );
+  const costValue = state.products.reduce((sum, product) =>
+    sum + Number(product.cost_price) * Number(product.stock_quantity), 0);
+  const profit = state.products.reduce((sum, product) =>
+    sum + (Number(product.sale_price) - Number(product.cost_price)) * Number(product.stock_quantity), 0);
+  elements.productCount.textContent = number(state.products.length);
+  elements.lowStockCount.textContent = number(lowStock.length);
+  elements.stockCostValue.textContent = money(costValue);
+  elements.expectedProfit.textContent = money(profit);
+  elements.productRows.innerHTML = products.map((product) => {
+    const low = Number(product.stock_quantity) <= Number(product.low_stock_limit);
+    return `<tr>
+      <td><strong>${escapeHtml(product.name)}</strong></td>
+      <td>${escapeHtml(product.barcode || "—")}</td>
+      <td>${money(product.sale_price)}</td>
+      <td>${money(product.cost_price)}</td>
+      <td><span class="stock-badge ${low ? "low" : ""}">${number(product.stock_quantity)}</span></td>
+      <td><span class="status-badge ${product.active ? "active" : "inactive"}">${product.active ? "نشط" : "متوقف"}</span></td>
+      <td>${can("products:manage") ? `<button class="icon-button" type="button" title="تعديل"
+        data-edit-product="${product.id}"><i data-lucide="pencil"></i></button>` : ""}</td>
+    </tr>`;
+  }).join("");
+  elements.productRows.querySelectorAll("[data-edit-product]").forEach((button) => {
+    button.addEventListener("click", () => openProductForm(Number(button.dataset.editProduct)));
+  });
+  refreshIcons();
+}
+
+function openProductForm(productId = null) {
+  const product = state.products.find((item) => Number(item.id) === productId);
+  state.editingProductId = product?.id || null;
+  elements.productDialogTitle.textContent = product ? "تعديل المنتج" : "منتج جديد";
+  elements.productName.value = product?.name || "";
+  elements.productBarcode.value = product?.barcode || "";
+  elements.productStock.value = product?.stock_quantity ?? 0;
+  elements.productSalePrice.value = product?.sale_price ?? "";
+  elements.productCostPrice.value = product?.cost_price ?? 0;
+  elements.productLowStock.value = product?.low_stock_limit ?? 5;
+  elements.productActive.checked = product?.active ?? true;
+  elements.productDialog.showModal();
+}
+
+async function saveProduct(event) {
+  event.preventDefault();
+  const payload = {
+    name: elements.productName.value.trim(),
+    barcode: elements.productBarcode.value.trim(),
+    stock_quantity: Number(elements.productStock.value),
+    sale_price: Number(elements.productSalePrice.value),
+    cost_price: Number(elements.productCostPrice.value),
+    low_stock_limit: Number(elements.productLowStock.value),
+    active: elements.productActive.checked
+  };
+  const url = state.editingProductId ? `/api/products/${state.editingProductId}` : "/api/products";
+  try {
+    await apiFetch(url, {
+      method: state.editingProductId ? "PATCH" : "POST",
+      body: JSON.stringify(payload)
+    });
+    elements.productDialog.close();
+    await loadProducts();
+    showToast("تم حفظ المنتج.");
+  } catch {
+    showToast("تعذر حفظ المنتج. راجع البيانات.");
+  }
+}
+
+async function loadUsers() {
+  if (!can("users:manage")) return;
+  try {
+    const data = await apiFetch("/api/users");
+    state.users = data.users;
+    renderUsers();
+  } catch {
+    showToast("تعذر تحميل المستخدمين.");
+  }
+}
+
+function renderUsers() {
+  elements.userRows.innerHTML = state.users.map((user) => `<tr>
+    <td><strong>${escapeHtml(user.display_name)}</strong></td>
+    <td>${escapeHtml(roleName(user.role))}</td>
+    <td>${user.last_login_at ? escapeHtml(formatDate(user.last_login_at)) : "لم يدخل بعد"}</td>
+    <td><span class="status-badge ${user.active ? "active" : "inactive"}">${user.active ? "نشط" : "متوقف"}</span></td>
+    <td><button class="icon-button" type="button" title="تعديل" data-edit-user="${user.id}">
+      <i data-lucide="pencil"></i></button></td>
+  </tr>`).join("");
+  elements.userRows.querySelectorAll("[data-edit-user]").forEach((button) => {
+    button.addEventListener("click", () => openUserForm(Number(button.dataset.editUser)));
+  });
+  refreshIcons();
+}
+
+function openUserForm(userId = null) {
+  const user = state.users.find((item) => Number(item.id) === userId);
+  state.editingUserId = user?.id || null;
+  elements.userDialogTitle.textContent = user ? "تعديل المستخدم" : "مستخدم جديد";
+  elements.userDisplayName.value = user?.display_name || "";
+  elements.userRole.value = user?.role || "cashier";
+  elements.userPassword.value = "";
+  elements.userPassword.required = !user;
+  elements.userActive.checked = user?.active ?? true;
+  elements.userDialog.showModal();
+}
+
+async function saveUser(event) {
+  event.preventDefault();
+  const payload = {
+    display_name: elements.userDisplayName.value.trim(),
+    role: elements.userRole.value,
+    active: elements.userActive.checked
+  };
+  if (elements.userPassword.value) payload.password = elements.userPassword.value;
+  const url = state.editingUserId ? `/api/users/${state.editingUserId}` : "/api/users";
+  try {
+    await apiFetch(url, {
+      method: state.editingUserId ? "PATCH" : "POST",
+      body: JSON.stringify(payload)
+    });
+    elements.userDialog.close();
+    await loadUsers();
+    showToast("تم حفظ المستخدم.");
+  } catch (error) {
+    showToast(error.status === 409 ? "كلمة المرور مستخدمة لحساب آخر." : "تعذر حفظ المستخدم.");
+  }
+}
+
+async function loadLogs() {
+  if (!can("logs:view")) return;
+  try {
+    const data = await apiFetch("/api/logs?limit=200");
+    elements.logRows.innerHTML = data.logs.map((log) => `<tr>
+      <td>${escapeHtml(formatDate(log.created_at))}</td>
+      <td>${escapeHtml(log.display_name || "النظام")}</td>
+      <td><strong>${escapeHtml(actionName(log.action))}</strong></td>
+      <td>${escapeHtml(log.entity_type || "—")} ${escapeHtml(log.entity_id || "")}</td>
+      <td dir="ltr">${escapeHtml(log.ip_address || "—")}</td>
+    </tr>`).join("");
+  } catch {
+    showToast("تعذر تحميل سجل النشاط.");
+  }
+}
+
+async function loadCashReport() {
+  if (!can("cash:view")) return;
+  const date = elements.cashDate.value || localDate(new Date());
+  try {
+    const data = await apiFetch(`/api/cash-report?date=${encodeURIComponent(date)}`);
+    const report = data.report;
+    elements.cashExpected.textContent = money(report.expected_cash);
+    elements.cashInvoiceCount.textContent = number(report.invoice_count);
+    elements.cashActual.textContent = report.actual_cash == null ? "لم يتم الإقفال" : money(report.actual_cash);
+    elements.cashVariance.textContent = report.variance == null ? "—" : signedMoney(report.variance);
+    elements.cashVarianceCard.classList.toggle("shortage", Number(report.variance) < 0);
+    elements.cashVarianceCard.classList.toggle("surplus", Number(report.variance) > 0);
+    elements.actualCashInput.value = report.actual_cash ?? "";
+    elements.cashNotes.value = report.notes || "";
+    elements.cashClosedInfo.textContent = report.closed_by_name
+      ? `آخر إقفال بواسطة ${report.closed_by_name} في ${formatDate(report.closed_at)}` : "";
+
+    if (date === localDate(new Date())) {
+      elements.todayExpectedCash.textContent = money(report.expected_cash);
+      elements.todayActualCash.textContent = report.actual_cash == null ? "لم يتم الإدخال" : money(report.actual_cash);
+      elements.todayVariance.textContent = report.variance == null ? "—" : signedMoney(report.variance);
+      elements.todayVariance.className = Number(report.variance) < 0 ? "negative" :
+        Number(report.variance) > 0 ? "positive" : "";
+    }
+  } catch {
+    showToast("تعذر تحميل التقرير اليومي.");
+  }
+}
+
+async function closeCashDay(event) {
+  event.preventDefault();
+  try {
+    await apiFetch("/api/cash-report/close", {
+      method: "POST",
+      body: JSON.stringify({
+        business_date: elements.cashDate.value,
+        actual_cash: Number(elements.actualCashInput.value),
+        notes: elements.cashNotes.value.trim()
+      })
+    });
+    await loadCashReport();
+    showToast("تم حفظ إقفال اليومية.");
+  } catch {
+    showToast("تعذر حفظ الإقفال.");
+  }
+}
+
 function csvCell(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
@@ -419,6 +721,11 @@ function money(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(Number(value || 0))} ج.م`;
+}
+
+function signedMoney(value) {
+  const amount = Number(value || 0);
+  return `${amount > 0 ? "+" : ""}${money(amount)}`;
 }
 
 function number(value) {
@@ -463,4 +770,20 @@ function escapeHtml(value) {
 
 function refreshIcons() {
   if (window.lucide) window.lucide.createIcons();
+}
+
+function roleName(role) {
+  return {
+    admin: "مدير كامل", manager: "مدير تشغيل",
+    cashier: "كاشير", viewer: "مشاهدة فقط"
+  }[role] || role;
+}
+
+function actionName(action) {
+  return {
+    LOGIN_SUCCESS: "تسجيل دخول", LOGIN_FAILED: "محاولة دخول فاشلة", LOGOUT: "تسجيل خروج",
+    USER_CREATED: "إنشاء مستخدم", USER_UPDATED: "تعديل مستخدم",
+    PRODUCT_CREATED: "إضافة منتج", PRODUCT_UPDATED: "تعديل منتج",
+    CASH_CLOSED: "إقفال اليومية"
+  }[action] || action;
 }
