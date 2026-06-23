@@ -45,14 +45,14 @@
         </div>
       </div>
       <nav aria-label="التنقل الرئيسي">
-        <a class="nav-item active" href="#overview">
+        <button class="nav-item active" type="button" data-view="overview">
           <i data-lucide="layout-dashboard"></i>
           نظرة عامة
-        </a>
-        <a class="nav-item" href="#invoices">
+        </button>
+        <button class="nav-item" type="button" data-view="invoices">
           <i data-lucide="receipt-text"></i>
           الفواتير
-        </a>
+        </button>
       </nav>
       <div class="sidebar-footer">
         <span id="connectionStatus" class="connection-status">
@@ -69,108 +69,167 @@
     <main class="content">
       <header class="topbar">
         <div>
-          <p class="eyebrow">لوحة التحكم</p>
-          <h1>نظرة عامة على المبيعات</h1>
+          <p id="pageEyebrow" class="eyebrow">لوحة التحكم</p>
+          <h1 id="pageTitle">نظرة عامة على المبيعات</h1>
         </div>
-        <button id="refreshButton" class="icon-button refresh-button" type="button" title="تحديث البيانات">
-          <i data-lucide="refresh-cw"></i>
-        </button>
+        <div class="topbar-actions">
+          <span id="lastUpdated" class="last-updated"></span>
+          <button id="refreshButton" class="icon-button refresh-button" type="button" title="تحديث البيانات">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </div>
       </header>
 
-      <section class="filters" aria-label="تصفية المبيعات">
-        <div class="search-field">
-          <i data-lucide="search"></i>
-          <input id="searchInput" type="search" placeholder="ابحث برقم الفاتورة أو المنتج">
+      <section id="overviewView" class="page-view">
+        <div class="period-toolbar" aria-label="اختيار الفترة">
+          <button class="period-button" type="button" data-period="today">اليوم</button>
+          <button class="period-button" type="button" data-period="7">آخر 7 أيام</button>
+          <button class="period-button" type="button" data-period="30">آخر 30 يوماً</button>
+          <button class="period-button active" type="button" data-period="all">كل الوقت</button>
         </div>
-        <label>
-          <span>من</span>
-          <input id="fromDate" type="date">
-        </label>
-        <label>
-          <span>إلى</span>
-          <input id="toDate" type="date">
-        </label>
-        <button id="clearFilters" class="secondary-button" type="button">مسح</button>
-      </section>
 
-      <section id="overview" class="metrics" aria-label="ملخص المبيعات">
-        <article class="metric">
-          <div class="metric-icon green"><i data-lucide="banknote"></i></div>
-          <div>
-            <span>إجمالي المبيعات</span>
-            <strong id="totalSales">0.00 ج.م</strong>
-          </div>
-        </article>
-        <article class="metric">
-          <div class="metric-icon blue"><i data-lucide="receipt"></i></div>
-          <div>
-            <span>عدد الفواتير</span>
-            <strong id="invoiceCount">0</strong>
-          </div>
-        </article>
-        <article class="metric">
-          <div class="metric-icon amber"><i data-lucide="shopping-basket"></i></div>
-          <div>
-            <span>القطع المباعة</span>
-            <strong id="itemsSold">0</strong>
-          </div>
-        </article>
-        <article class="metric">
-          <div class="metric-icon red"><i data-lucide="chart-no-axes-column-increasing"></i></div>
-          <div>
-            <span>متوسط الفاتورة</span>
-            <strong id="averageInvoice">0.00 ج.م</strong>
-          </div>
-        </article>
-      </section>
+        <section class="metrics" aria-label="ملخص المبيعات">
+          <article class="metric">
+            <div class="metric-icon green"><i data-lucide="banknote"></i></div>
+            <div>
+              <span>إجمالي المبيعات</span>
+              <strong id="totalSales">0.00 ج.م</strong>
+            </div>
+          </article>
+          <article class="metric">
+            <div class="metric-icon blue"><i data-lucide="receipt"></i></div>
+            <div>
+              <span>عدد الفواتير</span>
+              <strong id="invoiceCount">0</strong>
+            </div>
+          </article>
+          <article class="metric">
+            <div class="metric-icon amber"><i data-lucide="shopping-basket"></i></div>
+            <div>
+              <span>القطع المباعة</span>
+              <strong id="itemsSold">0</strong>
+            </div>
+          </article>
+          <article class="metric">
+            <div class="metric-icon red"><i data-lucide="chart-no-axes-column-increasing"></i></div>
+            <div>
+              <span>متوسط الفاتورة</span>
+              <strong id="averageInvoice">0.00 ج.م</strong>
+            </div>
+          </article>
+        </section>
 
-      <section class="insights">
-        <div class="panel sales-panel">
+        <section class="insights">
+          <div class="panel sales-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>المبيعات اليومية</h2>
+                <p>آخر 14 يوماً ضمن الفترة المحددة</p>
+              </div>
+            </div>
+            <div id="salesChart" class="bar-chart"></div>
+          </div>
+          <div class="panel products-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>الأكثر مبيعاً</h2>
+                <p>حسب عدد القطع</p>
+              </div>
+            </div>
+            <div id="topProducts" class="product-list"></div>
+          </div>
+        </section>
+
+        <section class="panel recent-panel">
           <div class="panel-heading">
             <div>
-              <h2>المبيعات اليومية</h2>
-              <p>آخر 14 يوماً ضمن الفترة المحددة</p>
+              <h2>أحدث الفواتير</h2>
+              <p>آخر عمليات البيع التي وصلت إلى الموقع</p>
             </div>
+            <button id="showAllInvoices" class="text-button" type="button">
+              عرض الكل
+              <i data-lucide="arrow-left"></i>
+            </button>
           </div>
-          <div id="salesChart" class="bar-chart"></div>
-        </div>
-        <div class="panel products-panel">
-          <div class="panel-heading">
-            <div>
-              <h2>الأكثر مبيعاً</h2>
-              <p>حسب عدد القطع</p>
-            </div>
-          </div>
-          <div id="topProducts" class="product-list"></div>
-        </div>
+          <div id="recentInvoices" class="recent-invoices"></div>
+        </section>
       </section>
 
-      <section id="invoices" class="panel invoices-panel">
-        <div class="panel-heading">
+      <section id="invoicesView" class="page-view" hidden>
+        <div class="invoice-tools">
+          <div class="search-field">
+            <i data-lucide="search"></i>
+            <input id="searchInput" type="search" placeholder="ابحث برقم الفاتورة أو اسم المنتج">
+          </div>
+          <label>
+            <span>من</span>
+            <input id="fromDate" type="date">
+          </label>
+          <label>
+            <span>إلى</span>
+            <input id="toDate" type="date">
+          </label>
+          <label>
+            <span>الترتيب</span>
+            <select id="invoiceSort">
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+              <option value="highest">الأعلى قيمة</option>
+              <option value="lowest">الأقل قيمة</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="invoice-actions">
+          <div id="invoiceResultLabel">أحدث الفواتير المرفوعة</div>
           <div>
-            <h2>الفواتير</h2>
-            <p id="invoiceResultLabel">أحدث الفواتير المرفوعة</p>
+            <button id="clearFilters" class="secondary-button" type="button">
+              <i data-lucide="filter-x"></i>
+              مسح الفلاتر
+            </button>
+            <button id="exportInvoices" class="primary-action-button" type="button">
+              <i data-lucide="download"></i>
+              تصدير CSV
+            </button>
           </div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>رقم الفاتورة</th>
-                <th>التاريخ</th>
-                <th>عدد القطع</th>
-                <th>الإجمالي</th>
-                <th><span class="sr-only">التفاصيل</span></th>
-              </tr>
-            </thead>
-            <tbody id="invoiceRows"></tbody>
-          </table>
-          <div id="emptyState" class="empty-state" hidden>
-            <i data-lucide="inbox"></i>
-            <strong>لا توجد فواتير</strong>
-            <span>ستظهر الفواتير هنا بعد مزامنتها من جهاز البيع.</span>
+
+        <section class="invoice-summary-strip">
+          <div><span>الفواتير المعروضة</span><strong id="filteredInvoiceCount">0</strong></div>
+          <div><span>إجمالي النتائج</span><strong id="filteredInvoiceTotal">0.00 ج.م</strong></div>
+          <div><span>أكبر فاتورة</span><strong id="largestInvoice">0.00 ج.م</strong></div>
+        </section>
+
+        <section class="panel invoices-panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>رقم الفاتورة</th>
+                  <th>التاريخ</th>
+                  <th>عدد القطع</th>
+                  <th>الإجمالي</th>
+                  <th><span class="sr-only">الإجراءات</span></th>
+                </tr>
+              </thead>
+              <tbody id="invoiceRows"></tbody>
+            </table>
+            <div id="emptyState" class="empty-state" hidden>
+              <i data-lucide="inbox"></i>
+              <strong>لا توجد فواتير</strong>
+              <span>غيّر البحث أو الفترة، أو انتظر مزامنة المبيعات من جهاز البيع.</span>
+            </div>
           </div>
-        </div>
+          <div class="pagination">
+            <button id="previousPage" class="icon-button" type="button" title="الصفحة السابقة">
+              <i data-lucide="chevron-right"></i>
+            </button>
+            <span id="pageLabel">صفحة 1 من 1</span>
+            <button id="nextPage" class="icon-button" type="button" title="الصفحة التالية">
+              <i data-lucide="chevron-left"></i>
+            </button>
+          </div>
+        </section>
       </section>
     </main>
   </div>
@@ -202,6 +261,16 @@
     <div class="dialog-total">
       <span>إجمالي الفاتورة</span>
       <strong id="dialogTotal">0.00 ج.م</strong>
+    </div>
+    <div class="dialog-actions">
+      <button id="copyInvoiceNumber" class="secondary-button" type="button">
+        <i data-lucide="copy"></i>
+        نسخ رقم الفاتورة
+      </button>
+      <button id="printInvoice" class="primary-action-button" type="button">
+        <i data-lucide="printer"></i>
+        طباعة
+      </button>
     </div>
   </dialog>
 
