@@ -222,6 +222,15 @@
         <div class="invoice-actions">
           <div id="invoiceResultLabel">أحدث الفواتير المرفوعة</div>
           <div>
+            <label class="page-size-control">
+              <span>عدد الصفوف</span>
+              <select id="invoicePageSize">
+                <option value="20">20</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="all">الكل</option>
+              </select>
+            </label>
             <button id="clearFilters" class="secondary-button" type="button">
               <i data-lucide="filter-x"></i>
               مسح الفلاتر

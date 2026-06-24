@@ -6,7 +6,7 @@ const state = {
   products: [],
   users: [],
   page: 1,
-  pageSize: 20,
+  pageSize: 50,
   searchTimer: null,
   selectedInvoiceId: null,
   editingProductId: null,
@@ -23,7 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "logoutButton", "refreshButton", "connectionStatus", "lastUpdated", "pageEyebrow",
     "pageTitle", "overviewView", "invoicesView", "productsView", "cashView", "usersView",
     "logsView", "announcementsView", "currentUser", "showAllInvoices", "searchInput",
-    "fromDate", "toDate", "invoiceSort", "clearFilters", "exportInvoices",
+    "fromDate", "toDate", "invoiceSort", "invoicePageSize", "clearFilters", "exportInvoices",
     "totalSales", "invoiceCount", "itemsSold", "averageInvoice", "salesChart",
     "topProducts", "recentInvoices", "invoiceRows", "invoiceResultLabel", "emptyState",
     "filteredInvoiceCount", "filteredInvoiceTotal", "largestInvoice", "previousPage",
@@ -83,6 +83,13 @@ function bindEvents() {
   elements.fromDate.addEventListener("change", filtersChanged);
   elements.toDate.addEventListener("change", filtersChanged);
   elements.invoiceSort.addEventListener("change", () => {
+    state.page = 1;
+    renderInvoicePage();
+  });
+  elements.invoicePageSize.addEventListener("change", () => {
+    state.pageSize = elements.invoicePageSize.value === "all"
+      ? Number.MAX_SAFE_INTEGER
+      : Number(elements.invoicePageSize.value);
     state.page = 1;
     renderInvoicePage();
   });

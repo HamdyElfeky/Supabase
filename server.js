@@ -773,7 +773,7 @@ app.get("/api/dashboard", requireSession, requirePermission("dashboard:view"), a
          ${where}
          GROUP BY i.id
          ORDER BY i.id DESC
-         LIMIT 200`,
+         LIMIT 5000`,
         values
       ),
       pool.query(
