@@ -479,6 +479,38 @@ app.patch("/api/announcements/:announcementId", requireSession,
     res.json({ ok: true, announcement: result.rows[0] });
   });
 
+app.get("/api/device-announcement", requireApiKey, async (_req, res) => {
+  const result = await pool.query(
+    `SELECT id, title, message
+     FROM announcements
+     WHERE active = TRUE AND desktop_read_at IS NULL
+     ORDER BY id
+     LIMIT 1`
+  );
+  if (result.rowCount === 0) {
+    return res.json({ ok: true, announcement: null });
+  }
+  const announcement = result.rows[0];
+  res.json({
+    ok: true,
+    announcement: {
+      id: Number(announcement.id),
+      title_base64: Buffer.from(announcement.title, "utf8").toString("base64"),
+      message_base64: Buffer.from(announcement.message, "utf8").toString("base64")
+    }
+  });
+});
+
+app.post("/api/device-announcement/:announcementId/read", requireApiKey, async (req, res) => {
+  const announcementId = Number(req.params.announcementId);
+  const result = await pool.query(
+    `UPDATE announcements SET desktop_read_at = NOW()
+     WHERE id = $1 RETURNING id`,
+    [announcementId]
+  );
+  res.json({ ok: true, updated: result.rowCount > 0 });
+});
+
 app.post("/api/system/emergency-reset", requireSession,
   requirePermission("system:reset"), async (req, res) => {
     const supplied = typeof req.body?.password === "string" ? req.body.password : "";

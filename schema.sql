@@ -91,9 +91,12 @@ CREATE TABLE IF NOT EXISTS announcements (
     title TEXT NOT NULL,
     message TEXT NOT NULL,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    desktop_read_at TIMESTAMPTZ,
     created_by BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS desktop_read_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS announcement_reads (
     announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,

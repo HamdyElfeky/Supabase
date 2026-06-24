@@ -12,8 +12,7 @@ const state = {
   editingProductId: null,
   editingUserId: null,
   refreshClicks: [],
-  pendingAnnouncements: [],
-  activeAnnouncementId: null
+  pendingAnnouncements: []
 };
 
 const elements = {};
@@ -40,8 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "productLowStock", "productActive", "userDialog", "userForm", "userDialogTitle",
     "userDisplayName", "userRole", "userPassword", "userActive", "addAnnouncementButton",
     "announcementRows", "announcementDialog", "announcementForm", "announcementTitle",
-    "announcementMessage", "announcementPopup", "popupAnnouncementTitle",
-    "popupAnnouncementMessage", "closeAnnouncementPopup", "toast"
+    "announcementMessage", "toast"
   ];
   ids.forEach((id) => { elements[id] = document.querySelector(`#${id}`); });
   elements.navItems = [...document.querySelectorAll("[data-view]")];
@@ -111,7 +109,6 @@ function bindEvents() {
   elements.refreshLogs.addEventListener("click", loadLogs);
   elements.addAnnouncementButton.addEventListener("click", () => elements.announcementDialog.showModal());
   elements.announcementForm.addEventListener("submit", saveAnnouncement);
-  elements.closeAnnouncementPopup.addEventListener("click", closeAnnouncement);
   document.querySelectorAll(".dialog-close").forEach((button) => {
     button.addEventListener("click", () => button.closest("dialog").close());
   });
@@ -181,7 +178,6 @@ async function restoreSession() {
 async function loadInitialData() {
   elements.cashDate.value = localDate(new Date());
   await Promise.all([loadDashboard(), loadCashReport()]);
-  await loadPendingAnnouncements();
 }
 
 function showDashboard() {
@@ -741,41 +737,6 @@ async function loadLogs() {
   }
 }
 
-async function loadPendingAnnouncements() {
-  try {
-    const data = await apiFetch("/api/announcements/pending");
-    state.pendingAnnouncements = data.announcements;
-    showNextAnnouncement();
-  } catch {
-    // Announcements should never block the rest of the dashboard.
-  }
-}
-
-function showNextAnnouncement() {
-  if (elements.announcementPopup.open || state.pendingAnnouncements.length === 0) return;
-  const announcement = state.pendingAnnouncements[0];
-  state.activeAnnouncementId = announcement.id;
-  elements.popupAnnouncementTitle.textContent = announcement.title;
-  elements.popupAnnouncementMessage.textContent = announcement.message;
-  elements.announcementPopup.showModal();
-  logClient("ANNOUNCEMENT_OPENED", {}, "announcement", announcement.id);
-}
-
-async function closeAnnouncement() {
-  if (!state.activeAnnouncementId) return;
-  const id = state.activeAnnouncementId;
-  try {
-    await apiFetch(`/api/announcements/${id}/read`, { method: "POST" });
-  } finally {
-    elements.announcementPopup.close();
-    state.pendingAnnouncements = state.pendingAnnouncements.filter(
-      (announcement) => Number(announcement.id) !== Number(id)
-    );
-    state.activeAnnouncementId = null;
-    showNextAnnouncement();
-  }
-}
-
 async function loadAnnouncements() {
   if (!can("announcements:manage")) return;
   try {
@@ -784,7 +745,7 @@ async function loadAnnouncements() {
       <td><strong>${escapeHtml(announcement.title)}</strong></td>
       <td class="announcement-message-cell">${escapeHtml(announcement.message)}</td>
       <td>${escapeHtml(formatDate(announcement.created_at))}</td>
-      <td>${number(announcement.read_count)}</td>
+      <td>${announcement.desktop_read_at ? escapeHtml(formatDate(announcement.desktop_read_at)) : "لم يظهر بعد"}</td>
       <td><span class="status-badge ${announcement.active ? "active" : "inactive"}">
         ${announcement.active ? "نشط" : "متوقف"}</span></td>
       <td><button class="icon-button" type="button" title="${announcement.active ? "إيقاف" : "تفعيل"}"
