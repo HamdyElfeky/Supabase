@@ -115,6 +115,26 @@ function bindEvents() {
   document.querySelectorAll(".dialog-close").forEach((button) => {
     button.addEventListener("click", () => button.closest("dialog").close());
   });
+  document.addEventListener("click", (event) => {
+    const control = event.target.closest("button, a");
+    if (!control || !state.token) return;
+    logClient("CONTROL_CLICKED", {
+      view: state.currentView,
+      control_id: control.id || null,
+      label: (control.textContent || control.title || "").trim().slice(0, 120)
+    });
+  });
+  document.addEventListener("change", (event) => {
+    const control = event.target;
+    if (!state.token || !control.matches("input, select, textarea") ||
+        control.type === "password" || control.id === "apiKey" ||
+        control.id === "userPassword") return;
+    logClient("FIELD_CHANGED", {
+      view: state.currentView,
+      field_id: control.id || null,
+      value: String(control.type === "checkbox" ? control.checked : control.value).slice(0, 300)
+    });
+  });
   window.addEventListener("hashchange", () => {
     switchView(location.hash.slice(1) || "overview", false);
   });
@@ -948,6 +968,7 @@ function actionName(action) {
     INVOICES_EXPORTED: "تصدير الفواتير", ANNOUNCEMENT_OPENED: "عرض إعلان",
     ANNOUNCEMENT_CLOSED: "إغلاق إعلان", ANNOUNCEMENT_CREATED: "إنشاء إعلان",
     ANNOUNCEMENT_UPDATED: "تعديل إعلان", EMERGENCY_RESET_FAILED: "محاولة مسح فاشلة",
-    EMERGENCY_RESET_COMPLETED: "مسح بيانات العمل"
+    EMERGENCY_RESET_COMPLETED: "مسح بيانات العمل", CONTROL_CLICKED: "ضغط زر",
+    FIELD_CHANGED: "تغيير حقل"
   }[action] || action;
 }
