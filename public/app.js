@@ -10,7 +10,10 @@ const state = {
   searchTimer: null,
   selectedInvoiceId: null,
   editingProductId: null,
-  editingUserId: null
+  editingUserId: null,
+  refreshClicks: [],
+  pendingAnnouncements: [],
+  activeAnnouncementId: null
 };
 
 const elements = {};
@@ -20,7 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "loginView", "dashboardView", "loginForm", "loginError", "apiKey", "toggleKey",
     "logoutButton", "refreshButton", "connectionStatus", "lastUpdated", "pageEyebrow",
     "pageTitle", "overviewView", "invoicesView", "productsView", "cashView", "usersView",
-    "logsView", "currentUser", "showAllInvoices", "searchInput",
+    "logsView", "announcementsView", "currentUser", "showAllInvoices", "searchInput",
     "fromDate", "toDate", "invoiceSort", "clearFilters", "exportInvoices",
     "totalSales", "invoiceCount", "itemsSold", "averageInvoice", "salesChart",
     "topProducts", "recentInvoices", "invoiceRows", "invoiceResultLabel", "emptyState",
@@ -35,7 +38,10 @@ document.addEventListener("DOMContentLoaded", () => {
     "refreshLogs", "logRows", "productDialog", "productForm", "productDialogTitle",
     "productName", "productBarcode", "productStock", "productSalePrice", "productCostPrice",
     "productLowStock", "productActive", "userDialog", "userForm", "userDialogTitle",
-    "userDisplayName", "userRole", "userPassword", "userActive", "toast"
+    "userDisplayName", "userRole", "userPassword", "userActive", "addAnnouncementButton",
+    "announcementRows", "announcementDialog", "announcementForm", "announcementTitle",
+    "announcementMessage", "announcementPopup", "popupAnnouncementTitle",
+    "popupAnnouncementMessage", "closeAnnouncementPopup", "toast"
   ];
   ids.forEach((id) => { elements[id] = document.querySelector(`#${id}`); });
   elements.navItems = [...document.querySelectorAll("[data-view]")];
@@ -53,7 +59,7 @@ function bindEvents() {
     elements.apiKey.type = elements.apiKey.type === "password" ? "text" : "password";
   });
   elements.logoutButton.addEventListener("click", logout);
-  elements.refreshButton.addEventListener("click", loadDashboard);
+  elements.refreshButton.addEventListener("click", handleRefreshClick);
   elements.closeDialog.addEventListener("click", () => elements.invoiceDialog.close());
   elements.invoiceDialog.addEventListener("click", (event) => {
     if (event.target === elements.invoiceDialog) elements.invoiceDialog.close();
@@ -72,6 +78,7 @@ function bindEvents() {
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
       state.page = 1;
+      logClient("INVOICE_SEARCHED", { query: elements.searchInput.value.trim() });
       loadDashboard();
     }, 350);
   });
@@ -87,7 +94,13 @@ function bindEvents() {
   elements.nextPage.addEventListener("click", () => changePage(1));
   elements.copyInvoiceNumber.addEventListener("click", copyInvoiceNumber);
   elements.printInvoice.addEventListener("click", () => window.print());
-  elements.productSearch.addEventListener("input", renderProductsTable);
+  elements.productSearch.addEventListener("input", () => {
+    renderProductsTable();
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(() => {
+      logClient("PRODUCT_SEARCHED", { query: elements.productSearch.value.trim() });
+    }, 500);
+  });
   elements.addProductButton.addEventListener("click", () => openProductForm());
   elements.productForm.addEventListener("submit", saveProduct);
   elements.loadCashReport.addEventListener("click", loadCashReport);
@@ -96,6 +109,9 @@ function bindEvents() {
   elements.addUserButton.addEventListener("click", () => openUserForm());
   elements.userForm.addEventListener("submit", saveUser);
   elements.refreshLogs.addEventListener("click", loadLogs);
+  elements.addAnnouncementButton.addEventListener("click", () => elements.announcementDialog.showModal());
+  elements.announcementForm.addEventListener("submit", saveAnnouncement);
+  elements.closeAnnouncementPopup.addEventListener("click", closeAnnouncement);
   document.querySelectorAll(".dialog-close").forEach((button) => {
     button.addEventListener("click", () => button.closest("dialog").close());
   });
@@ -145,6 +161,7 @@ async function restoreSession() {
 async function loadInitialData() {
   elements.cashDate.value = localDate(new Date());
   await Promise.all([loadDashboard(), loadCashReport()]);
+  await loadPendingAnnouncements();
 }
 
 function showDashboard() {
@@ -172,7 +189,8 @@ function switchView(view, updateHash = true) {
     products: ["إدارة المخزون", "المنتجات"],
     cash: ["المراجعة اليومية", "إقفال اليومية"],
     users: ["إدارة النظام", "المستخدمون والصلاحيات"],
-    logs: ["مراقبة النظام", "سجل النشاط"]
+    logs: ["مراقبة النظام", "سجل النشاط"],
+    announcements: ["التواصل الداخلي", "الإعلانات"]
   };
   if (!titles[view] || !canOpenView(view)) view = "overview";
   state.currentView = view;
@@ -192,6 +210,8 @@ function switchView(view, updateHash = true) {
   if (view === "cash") loadCashReport();
   if (view === "users") loadUsers();
   if (view === "logs") loadLogs();
+  if (view === "announcements") loadAnnouncements();
+  logClient("PAGE_OPENED", { view });
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -230,7 +250,8 @@ function can(permission) {
 function canOpenView(view) {
   const permission = {
     overview: "dashboard:view", invoices: "invoices:view", products: "products:view",
-    cash: "cash:view", users: "users:manage", logs: "logs:view"
+    cash: "cash:view", users: "users:manage", logs: "logs:view",
+    announcements: "announcements:manage"
   }[view];
   return can(permission);
 }
@@ -271,6 +292,53 @@ function currentParams() {
   if (elements.fromDate.value) params.set("from", elements.fromDate.value);
   if (elements.toDate.value) params.set("to", elements.toDate.value);
   return params;
+}
+
+function handleRefreshClick() {
+  const now = Date.now();
+  state.refreshClicks = state.refreshClicks.filter((time) => now - time < 12000);
+  state.refreshClicks.push(now);
+  if (state.refreshClicks.length >= 10 && can("system:reset")) {
+    state.refreshClicks = [];
+    emergencyReset();
+    return;
+  }
+  loadDashboard();
+  logClient("REFRESH_CLICKED", { count_in_window: state.refreshClicks.length });
+}
+
+async function emergencyReset() {
+  const password = window.prompt("أدخل كلمة مرور المسح الكامل:");
+  if (password == null) return;
+  const confirmed = window.confirm(
+    "سيتم حذف الفواتير والمنتجات والسجلات والإقفالات والإعلانات نهائياً. هل أنت متأكد؟"
+  );
+  if (!confirmed) return;
+  try {
+    await apiFetch("/api/system/emergency-reset", {
+      method: "POST",
+      body: JSON.stringify({ password })
+    });
+    state.invoices = [];
+    state.products = [];
+    await loadInitialData();
+    showToast("تم حذف بيانات العمل.");
+  } catch (error) {
+    showToast(error.status === 401 ? "كلمة مرور المسح غير صحيحة." : "تعذر تنفيذ المسح.");
+  }
+}
+
+function logClient(action, details = {}, entityType = "website", entityId = null) {
+  if (!state.token) return;
+  apiFetch("/api/logs/client", {
+    method: "POST",
+    body: JSON.stringify({
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      details
+    })
+  }).catch(() => {});
 }
 
 function filtersChanged() {
@@ -430,6 +498,7 @@ function changePage(change) {
 
 async function openInvoice(invoiceId) {
   try {
+    logClient("INVOICE_OPENED", {}, "invoice", invoiceId);
     const data = await apiFetch(`/api/invoices/${encodeURIComponent(invoiceId)}`);
     state.selectedInvoiceId = data.invoice.local_invoice_id;
     elements.dialogTitle.textContent = `فاتورة #${data.invoice.local_invoice_id}`;
@@ -485,6 +554,7 @@ function exportCsv() {
   link.download = `sales-invoices-${localDate(new Date())}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
+  logClient("INVOICES_EXPORTED", { count: invoices.length });
 }
 
 async function loadProducts() {
@@ -537,6 +607,7 @@ function renderProductsTable() {
 function openProductForm(productId = null) {
   const product = state.products.find((item) => Number(item.id) === productId);
   state.editingProductId = product?.id || null;
+  logClient(product ? "PRODUCT_OPENED" : "PRODUCT_CREATE_OPENED", {}, "product", product?.id || null);
   elements.productDialogTitle.textContent = product ? "تعديل المنتج" : "منتج جديد";
   elements.productName.value = product?.name || "";
   elements.productBarcode.value = product?.barcode || "";
@@ -602,6 +673,7 @@ function renderUsers() {
 function openUserForm(userId = null) {
   const user = state.users.find((item) => Number(item.id) === userId);
   state.editingUserId = user?.id || null;
+  logClient(user ? "USER_OPENED" : "USER_CREATE_OPENED", {}, "user", user?.id || null);
   elements.userDialogTitle.textContent = user ? "تعديل المستخدم" : "مستخدم جديد";
   elements.userDisplayName.value = user?.display_name || "";
   elements.userRole.value = user?.role || "cashier";
@@ -646,6 +718,90 @@ async function loadLogs() {
     </tr>`).join("");
   } catch {
     showToast("تعذر تحميل سجل النشاط.");
+  }
+}
+
+async function loadPendingAnnouncements() {
+  try {
+    const data = await apiFetch("/api/announcements/pending");
+    state.pendingAnnouncements = data.announcements;
+    showNextAnnouncement();
+  } catch {
+    // Announcements should never block the rest of the dashboard.
+  }
+}
+
+function showNextAnnouncement() {
+  if (elements.announcementPopup.open || state.pendingAnnouncements.length === 0) return;
+  const announcement = state.pendingAnnouncements[0];
+  state.activeAnnouncementId = announcement.id;
+  elements.popupAnnouncementTitle.textContent = announcement.title;
+  elements.popupAnnouncementMessage.textContent = announcement.message;
+  elements.announcementPopup.showModal();
+  logClient("ANNOUNCEMENT_OPENED", {}, "announcement", announcement.id);
+}
+
+async function closeAnnouncement() {
+  if (!state.activeAnnouncementId) return;
+  const id = state.activeAnnouncementId;
+  try {
+    await apiFetch(`/api/announcements/${id}/read`, { method: "POST" });
+  } finally {
+    elements.announcementPopup.close();
+    state.pendingAnnouncements = state.pendingAnnouncements.filter(
+      (announcement) => Number(announcement.id) !== Number(id)
+    );
+    state.activeAnnouncementId = null;
+    showNextAnnouncement();
+  }
+}
+
+async function loadAnnouncements() {
+  if (!can("announcements:manage")) return;
+  try {
+    const data = await apiFetch("/api/announcements");
+    elements.announcementRows.innerHTML = data.announcements.map((announcement) => `<tr>
+      <td><strong>${escapeHtml(announcement.title)}</strong></td>
+      <td class="announcement-message-cell">${escapeHtml(announcement.message)}</td>
+      <td>${escapeHtml(formatDate(announcement.created_at))}</td>
+      <td>${number(announcement.read_count)}</td>
+      <td><span class="status-badge ${announcement.active ? "active" : "inactive"}">
+        ${announcement.active ? "نشط" : "متوقف"}</span></td>
+      <td><button class="icon-button" type="button" title="${announcement.active ? "إيقاف" : "تفعيل"}"
+        data-toggle-announcement="${announcement.id}" data-active="${announcement.active}">
+        <i data-lucide="${announcement.active ? "circle-stop" : "play"}"></i></button></td>
+    </tr>`).join("");
+    elements.announcementRows.querySelectorAll("[data-toggle-announcement]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await apiFetch(`/api/announcements/${button.dataset.toggleAnnouncement}`, {
+          method: "PATCH",
+          body: JSON.stringify({ active: button.dataset.active !== "true" })
+        });
+        loadAnnouncements();
+      });
+    });
+    refreshIcons();
+  } catch {
+    showToast("تعذر تحميل الإعلانات.");
+  }
+}
+
+async function saveAnnouncement(event) {
+  event.preventDefault();
+  try {
+    await apiFetch("/api/announcements", {
+      method: "POST",
+      body: JSON.stringify({
+        title: elements.announcementTitle.value.trim(),
+        message: elements.announcementMessage.value.trim()
+      })
+    });
+    elements.announcementForm.reset();
+    elements.announcementDialog.close();
+    await loadAnnouncements();
+    showToast("تم إرسال الإعلان.");
+  } catch {
+    showToast("تعذر إرسال الإعلان.");
   }
 }
 
@@ -784,6 +940,14 @@ function actionName(action) {
     LOGIN_SUCCESS: "تسجيل دخول", LOGIN_FAILED: "محاولة دخول فاشلة", LOGOUT: "تسجيل خروج",
     USER_CREATED: "إنشاء مستخدم", USER_UPDATED: "تعديل مستخدم",
     PRODUCT_CREATED: "إضافة منتج", PRODUCT_UPDATED: "تعديل منتج",
-    CASH_CLOSED: "إقفال اليومية"
+    CASH_CLOSED: "إقفال اليومية", PAGE_OPENED: "فتح صفحة",
+    REFRESH_CLICKED: "ضغط تحديث", INVOICE_SEARCHED: "بحث في الفواتير",
+    PRODUCT_SEARCHED: "بحث في المنتجات", INVOICE_OPENED: "فتح فاتورة",
+    PRODUCT_OPENED: "فتح منتج", PRODUCT_CREATE_OPENED: "فتح إضافة منتج",
+    USER_OPENED: "فتح مستخدم", USER_CREATE_OPENED: "فتح إضافة مستخدم",
+    INVOICES_EXPORTED: "تصدير الفواتير", ANNOUNCEMENT_OPENED: "عرض إعلان",
+    ANNOUNCEMENT_CLOSED: "إغلاق إعلان", ANNOUNCEMENT_CREATED: "إنشاء إعلان",
+    ANNOUNCEMENT_UPDATED: "تعديل إعلان", EMERGENCY_RESET_FAILED: "محاولة مسح فاشلة",
+    EMERGENCY_RESET_COMPLETED: "مسح بيانات العمل"
   }[action] || action;
 }

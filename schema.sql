@@ -69,9 +69,12 @@ CREATE TABLE IF NOT EXISTS products (
     stock_quantity INTEGER NOT NULL DEFAULT 0,
     low_stock_limit INTEGER NOT NULL DEFAULT 5,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    source TEXT NOT NULL DEFAULT 'web',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'web';
 
 CREATE TABLE IF NOT EXISTS daily_cash_closures (
     id BIGSERIAL PRIMARY KEY,
@@ -83,7 +86,24 @@ CREATE TABLE IF NOT EXISTS daily_cash_closures (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS announcements (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS announcement_reads (
+    announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (announcement_id, user_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_user_expiry ON user_sessions(user_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_cash_closures_date ON daily_cash_closures(business_date DESC);
+CREATE INDEX IF NOT EXISTS idx_announcements_active_created ON announcements(active, created_at DESC);

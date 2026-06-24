@@ -69,6 +69,10 @@
           <i data-lucide="history"></i>
           سجل النشاط
         </button>
+        <button class="nav-item" type="button" data-view="announcements" data-permission="announcements:manage">
+          <i data-lucide="megaphone"></i>
+          الإعلانات
+        </button>
       </nav>
       <div class="sidebar-footer">
         <span id="connectionStatus" class="connection-status">
@@ -354,6 +358,24 @@
           </div>
         </section>
       </section>
+
+      <section id="announcementsView" class="page-view" hidden>
+        <div class="section-toolbar">
+          <div><h2>الإعلانات</h2><p class="muted-line">تظهر الرسالة مرة واحدة لكل مستخدم ويمكنه إغلاقها.</p></div>
+          <button id="addAnnouncementButton" class="primary-action-button" type="button">
+            <i data-lucide="plus"></i>
+            إعلان جديد
+          </button>
+        </div>
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>العنوان</th><th>الرسالة</th><th>الوقت</th><th>شاهده</th><th>الحالة</th><th></th></tr></thead>
+              <tbody id="announcementRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </main>
   </div>
 
@@ -438,6 +460,27 @@
       <div class="password-hint">يجب أن تكون كلمة المرور مختلفة عن كلمات مرور كل المستخدمين.</div>
       <div class="dialog-actions"><button class="primary-action-button" type="submit"><i data-lucide="save"></i> حفظ</button></div>
     </form>
+  </dialog>
+
+  <dialog id="announcementDialog" class="form-dialog">
+    <form id="announcementForm">
+      <div class="dialog-header">
+        <div><p class="eyebrow">رسالة للمستخدمين</p><h2>إعلان جديد</h2></div>
+        <button class="icon-button dialog-close" type="button" title="إغلاق"><i data-lucide="x"></i></button>
+      </div>
+      <div class="form-grid">
+        <label class="full"><span>عنوان الإعلان</span><input id="announcementTitle" required maxlength="120"></label>
+        <label class="full"><span>نص الإعلان</span><textarea id="announcementMessage" rows="5" required maxlength="1200"></textarea></label>
+      </div>
+      <div class="dialog-actions"><button class="primary-action-button" type="submit"><i data-lucide="send"></i> إرسال</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="announcementPopup" class="announcement-popup">
+    <div class="announcement-icon"><i data-lucide="megaphone"></i></div>
+    <h2 id="popupAnnouncementTitle"></h2>
+    <p id="popupAnnouncementMessage"></p>
+    <button id="closeAnnouncementPopup" class="primary-action-button" type="button">قرأت الرسالة</button>
   </dialog>
 
   <div id="toast" class="toast" role="status"></div>

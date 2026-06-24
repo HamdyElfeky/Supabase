@@ -9,6 +9,7 @@ const app = express();
 const port = Number(process.env.PORT || 10000);
 const apiKey = process.env.API_KEY;
 const databaseUrl = process.env.DATABASE_URL;
+const emergencyResetPassword = process.env.EMERGENCY_RESET_PASSWORD || "";
 
 if (!apiKey) {
   throw new Error("API_KEY environment variable is required");
@@ -25,7 +26,8 @@ const pool = new Pool({
 
 const rolePermissions = {
   admin: ["dashboard:view", "invoices:view", "products:view", "products:manage",
-    "users:manage", "logs:view", "cash:view", "cash:close"],
+    "users:manage", "logs:view", "cash:view", "cash:close", "announcements:manage",
+    "system:reset"],
   manager: ["dashboard:view", "invoices:view", "products:view", "products:manage",
     "logs:view", "cash:view", "cash:close"],
   cashier: ["dashboard:view", "invoices:view", "products:view", "cash:view", "cash:close"],
@@ -394,6 +396,124 @@ app.get("/api/logs", requireSession, requirePermission("logs:view"), async (req,
   res.json({ ok: true, logs: result.rows });
 });
 
+app.post("/api/logs/client", requireSession, async (req, res) => {
+  const action = typeof req.body?.action === "string"
+    ? req.body.action.replace(/[^A-Z0-9_]/g, "").slice(0, 80) : "";
+  if (!action) {
+    return res.status(400).json({ ok: false, error: "Invalid action" });
+  }
+  const details = req.body?.details && typeof req.body.details === "object"
+    ? req.body.details : {};
+  await writeLog(req, action, req.body.entity_type || "website",
+    req.body.entity_id || null, details);
+  res.json({ ok: true });
+});
+
+app.get("/api/announcements/pending", requireSession, async (req, res) => {
+  const result = await pool.query(
+    `SELECT a.id, a.title, a.message, a.created_at, u.display_name AS created_by_name
+     FROM announcements a
+     LEFT JOIN app_users u ON u.id = a.created_by
+     LEFT JOIN announcement_reads r ON r.announcement_id = a.id AND r.user_id = $1
+     WHERE a.active = TRUE AND r.user_id IS NULL
+     ORDER BY a.id`,
+    [req.user.id]
+  );
+  res.json({ ok: true, announcements: result.rows });
+});
+
+app.post("/api/announcements/:announcementId/read", requireSession, async (req, res) => {
+  const announcementId = Number(req.params.announcementId);
+  await pool.query(
+    `INSERT INTO announcement_reads (announcement_id, user_id)
+     VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [announcementId, req.user.id]
+  );
+  await writeLog(req, "ANNOUNCEMENT_CLOSED", "announcement", announcementId);
+  res.json({ ok: true });
+});
+
+app.get("/api/announcements", requireSession,
+  requirePermission("announcements:manage"), async (_req, res) => {
+    const result = await pool.query(
+      `SELECT a.id, a.title, a.message, a.active, a.created_at,
+              u.display_name AS created_by_name,
+              COUNT(r.user_id)::integer AS read_count
+       FROM announcements a
+       LEFT JOIN app_users u ON u.id = a.created_by
+       LEFT JOIN announcement_reads r ON r.announcement_id = a.id
+       GROUP BY a.id, u.display_name
+       ORDER BY a.id DESC LIMIT 100`
+    );
+    res.json({ ok: true, announcements: result.rows });
+  });
+
+app.post("/api/announcements", requireSession,
+  requirePermission("announcements:manage"), async (req, res) => {
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    if (!title || !message) {
+      return res.status(400).json({ ok: false, error: "Title and message are required" });
+    }
+    const result = await pool.query(
+      `INSERT INTO announcements (title, message, created_by)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [title, message, req.user.id]
+    );
+    await writeLog(req, "ANNOUNCEMENT_CREATED", "announcement", result.rows[0].id, { title });
+    res.status(201).json({ ok: true, announcement: result.rows[0] });
+  });
+
+app.patch("/api/announcements/:announcementId", requireSession,
+  requirePermission("announcements:manage"), async (req, res) => {
+    const announcementId = Number(req.params.announcementId);
+    const active = Boolean(req.body?.active);
+    const result = await pool.query(
+      "UPDATE announcements SET active = $1 WHERE id = $2 RETURNING *",
+      [active, announcementId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ ok: false, error: "Announcement not found" });
+    }
+    await writeLog(req, "ANNOUNCEMENT_UPDATED", "announcement", announcementId, { active });
+    res.json({ ok: true, announcement: result.rows[0] });
+  });
+
+app.post("/api/system/emergency-reset", requireSession,
+  requirePermission("system:reset"), async (req, res) => {
+    const supplied = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!emergencyResetPassword) {
+      return res.status(503).json({ ok: false, error: "Emergency reset is not configured" });
+    }
+    const suppliedBuffer = Buffer.from(supplied);
+    const expectedBuffer = Buffer.from(emergencyResetPassword);
+    const valid = suppliedBuffer.length === expectedBuffer.length &&
+      crypto.timingSafeEqual(suppliedBuffer, expectedBuffer);
+    if (!valid) {
+      await writeLog(req, "EMERGENCY_RESET_FAILED", "system", null);
+      return res.status(401).json({ ok: false, error: "Invalid reset password" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`
+        TRUNCATE TABLE
+          announcement_reads, announcements, daily_cash_closures, products,
+          sync_events, invoice_items, invoices, activity_logs
+        RESTART IDENTITY CASCADE
+      `);
+      await client.query("COMMIT");
+      await writeLog(req, "EMERGENCY_RESET_COMPLETED", "system", null);
+      res.json({ ok: true });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
 app.get("/api/products", requireSession, requirePermission("products:view"), async (req, res) => {
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
   const values = [];
@@ -469,6 +589,46 @@ app.get("/api/products-sync", requireApiKey, async (_req, res) => {
      FROM products ORDER BY id`
   );
   res.json({ ok: true, products: result.rows });
+});
+
+app.post("/api/products-sync", requireApiKey, async (req, res) => {
+  if (!Array.isArray(req.body?.products)) {
+    return res.status(400).json({ ok: false, error: "Products are required" });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const receivedIds = [];
+    for (const product of req.body.products) {
+      if (!Number.isInteger(product.product_id) || typeof product.name !== "string") continue;
+      receivedIds.push(product.product_id);
+      await client.query(
+        `INSERT INTO products
+           (local_product_id, name, barcode, sale_price, stock_quantity, active, source)
+         VALUES ($1, $2, $3, $4, $5, TRUE, 'desktop')
+         ON CONFLICT (local_product_id) DO UPDATE SET
+           name=EXCLUDED.name, barcode=EXCLUDED.barcode, sale_price=EXCLUDED.sale_price,
+           stock_quantity=EXCLUDED.stock_quantity, active=TRUE, source='desktop', updated_at=NOW()`,
+        [product.product_id, product.name, product.barcode || null,
+          Number(product.sale_price || 0), Number(product.stock_quantity || 0)]
+      );
+    }
+    if (receivedIds.length > 0) {
+      await client.query(
+        `UPDATE products SET active=FALSE, updated_at=NOW()
+         WHERE source='desktop' AND NOT (local_product_id = ANY($1::integer[]))`,
+        [receivedIds]
+      );
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true, count: receivedIds.length });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Product sync failed", error);
+    res.status(500).json({ ok: false, error: "Product sync failed" });
+  } finally {
+    client.release();
+  }
 });
 
 app.get("/api/cash-report", requireSession, requirePermission("cash:view"), async (req, res) => {

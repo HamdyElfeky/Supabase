@@ -815,6 +815,7 @@ button svg,
 .cash-date-toolbar input,
 .form-grid input,
 .form-grid select,
+.form-grid textarea,
 .cash-close-panel input,
 .cash-close-panel textarea {
   width: 100%;
@@ -824,6 +825,45 @@ button svg,
   border-radius: 6px;
   outline: 0;
   background: white;
+}
+
+.announcement-popup {
+  width: min(460px, calc(100% - 28px));
+  padding: 30px;
+  text-align: center;
+}
+
+.announcement-popup h2 {
+  margin: 16px 0 8px;
+}
+
+.announcement-popup p {
+  margin: 0 0 24px;
+  color: var(--muted);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.announcement-message-cell {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.announcement-icon {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  margin: auto;
+  border-radius: 7px;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.announcement-icon svg {
+  width: 26px;
+  height: 26px;
 }
 
 .cash-report-grid {
