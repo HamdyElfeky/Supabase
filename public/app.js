@@ -12,7 +12,8 @@ const state = {
   editingProductId: null,
   editingUserId: null,
   refreshClicks: [],
-  pendingAnnouncements: []
+  pendingAnnouncements: [],
+  lastClientLogs: new Map()
 };
 
 const elements = {};
@@ -91,7 +92,11 @@ function bindEvents() {
       ? Number.MAX_SAFE_INTEGER
       : Number(elements.invoicePageSize.value);
     state.page = 1;
-    renderInvoicePage();
+    if (elements.invoicePageSize.value === "all" && state.invoices.length < 1500) {
+      loadDashboard();
+    } else {
+      renderInvoicePage();
+    }
   });
   elements.clearFilters.addEventListener("click", clearFilters);
   elements.exportInvoices.addEventListener("click", exportCsv);
@@ -314,6 +319,7 @@ function currentParams() {
   if (elements.searchInput.value.trim()) params.set("search", elements.searchInput.value.trim());
   if (elements.fromDate.value) params.set("from", elements.fromDate.value);
   if (elements.toDate.value) params.set("to", elements.toDate.value);
+  params.set("limit", elements.invoicePageSize.value === "all" ? "5000" : "1500");
   return params;
 }
 
@@ -353,6 +359,12 @@ async function emergencyReset() {
 
 function logClient(action, details = {}, entityType = "website", entityId = null) {
   if (!state.token) return;
+  const logKey = `${action}:${entityType}:${entityId || ""}:${details.view || ""}:${details.control_id || details.field_id || ""}`;
+  const now = Date.now();
+  const last = state.lastClientLogs.get(logKey) || 0;
+  const quietWindow = action === "CONTROL_CLICKED" || action === "FIELD_CHANGED" ? 3000 : 750;
+  if (now - last < quietWindow) return;
+  state.lastClientLogs.set(logKey, now);
   apiFetch("/api/logs/client", {
     method: "POST",
     body: JSON.stringify({

@@ -21,7 +21,12 @@ if (!databaseUrl) {
 
 const pool = new Pool({
   connectionString: databaseUrl,
-  ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false }
+  ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false },
+  max: Number(process.env.PG_POOL_MAX || 5),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  query_timeout: 20000,
+  statement_timeout: 20000
 });
 
 const rolePermissions = {
@@ -37,6 +42,10 @@ const rolePermissions = {
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+app.get(["/healthz", "/api/healthz"], (_req, res) => {
+  res.json({ ok: true, service: "sales-system-api" });
+});
 
 function requireApiKey(req, res, next) {
   if (req.get("X-Api-Key") !== apiKey) {
@@ -720,6 +729,7 @@ app.get("/api/dashboard", requireSession, requirePermission("dashboard:view"), a
   const from = typeof req.query.from === "string" ? req.query.from : "";
   const to = typeof req.query.to === "string" ? req.query.to : "";
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const invoiceLimit = Math.min(Math.max(Number(req.query.limit) || 1500, 50), 5000);
   const conditions = [];
   const values = [];
 
@@ -773,8 +783,8 @@ app.get("/api/dashboard", requireSession, requirePermission("dashboard:view"), a
          ${where}
          GROUP BY i.id
          ORDER BY i.id DESC
-         LIMIT 5000`,
-        values
+         LIMIT $${values.length + 1}`,
+        [...values, invoiceLimit]
       ),
       pool.query(
         `SELECT
